@@ -213,7 +213,7 @@ def get_analyzer() -> Any:
             "insightface is not installed; run `pip install -r requirements.txt` "
             "to enable real face analysis (unit tests work without it)"
         ) from exc
-    analyzer = FaceAnalysis(name=settings.model_name)
+    analyzer = FaceAnalysis(name=settings.model_name, root=settings.model_root)
     analyzer.prepare(ctx_id=0, det_size=settings.det_size)
     _analyzer = analyzer
     return _analyzer

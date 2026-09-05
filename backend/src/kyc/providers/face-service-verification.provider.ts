@@ -53,7 +53,7 @@ interface FaceServiceCompareResponse {
 }
 
 export interface FaceServiceProviderConfiguration {
-  values: Pick<AppConfiguration, "faceServiceUrl" | "faceServiceTimeoutMs">;
+  values: Pick<AppConfiguration, "faceServiceUrl" | "faceServiceTimeoutMs" | "faceApiKey">;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -155,6 +155,7 @@ function parseCompareResponse(value: unknown): FaceServiceCompareResponse | null
 export class FaceServiceVerificationProvider implements FaceVerificationProvider {
   private readonly faceServiceUrl: string;
   private readonly faceServiceTimeoutMs: number;
+  private readonly faceApiKey: string;
 
   constructor(
     configuration: FaceServiceProviderConfiguration,
@@ -162,6 +163,7 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
   ) {
     this.faceServiceUrl = configuration.values.faceServiceUrl;
     this.faceServiceTimeoutMs = configuration.values.faceServiceTimeoutMs;
+    this.faceApiKey = configuration.values.faceApiKey;
   }
 
   async verify(documentImage: Buffer, selfieImage: Buffer): Promise<FaceVerificationResult> {
@@ -213,9 +215,13 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
     const timeout = setTimeout(() => controller.abort(), this.faceServiceTimeoutMs);
     let response: FaceServiceFetchResponse;
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-API-Key": this.faceApiKey,
+      };
       response = await this.fetchImplementation(`${this.faceServiceUrl}${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(body),
         signal: controller.signal,
       });

@@ -129,7 +129,12 @@ function createUploadHarness(startingStatus: string): UploadHarness {
   } as unknown as FileStorage;
 
   return {
-    service: new KycService(prismaService, imageNormalizationService, fileStorage),
+    service: new KycService(
+      prismaService,
+      imageNormalizationService,
+      fileStorage,
+      { values: { documentProvider: "local", faceVerificationProvider: "local" } } as never,
+    ),
     write,
   };
 }

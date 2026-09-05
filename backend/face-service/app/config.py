@@ -59,8 +59,10 @@ class Settings:
     blur_threshold: float
     min_face_width_px: int
     model_name: str
+    model_root: str
     det_size: tuple
     max_image_bytes: int
+    face_api_key: str
 
 
 @lru_cache(maxsize=1)
@@ -73,6 +75,8 @@ def get_settings() -> Settings:
         blur_threshold=_env_float("FACE_BLUR_THRESHOLD", DEFAULT_BLUR_THRESHOLD),
         min_face_width_px=_env_int("FACE_MIN_WIDTH_PX", DEFAULT_MIN_FACE_WIDTH_PX),
         model_name=os.getenv("INSIGHTFACE_MODEL", DEFAULT_MODEL_NAME),
+        model_root=os.path.expanduser(os.getenv("INSIGHTFACE_ROOT", "~/.insightface")),
         det_size=_env_det_size(os.getenv("FACE_DET_SIZE", "640,640")),
         max_image_bytes=MAX_DECODED_IMAGE_BYTES,
+        face_api_key=os.getenv("FACE_API_KEY", "").strip(),
     )

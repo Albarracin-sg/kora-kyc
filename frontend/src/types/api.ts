@@ -33,6 +33,13 @@ export const DOCUMENT_SIDE = {
 
 export type DocumentSide = (typeof DOCUMENT_SIDE)[keyof typeof DOCUMENT_SIDE];
 
+export const REMOTE_BIOMETRIC_CONSENT_VERSION = "remote-verification-v2";
+
+export interface KycConsentRequirements {
+  requiresExternalProcessing: boolean;
+  consentVersion: string | null;
+}
+
 export const DOCUMENT_CHECK_RESULT = {
   VALID: "VALID",
   REVIEW: "REVIEW",

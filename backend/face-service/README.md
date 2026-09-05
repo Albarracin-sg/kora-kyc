@@ -1,6 +1,6 @@
 # Koa Face Service
 
-Standalone facial comparison service for KYC identity verification.
+Servicio público de comparación facial para KYC, llamado sólo por el backend NestJS.
 
 **Scope (closed by decision):** FastAPI + InsightFace/ArcFace (SCRFD
 detector + ArcFace embeddings), cosine-similarity comparison, and a
@@ -8,8 +8,9 @@ pre-comparison **quality gate** that flags small (<100 px wide) or blurry
 faces as `LOW` / `NEEDS_REVIEW`. Nothing else.
 
 - The document OCR pipeline is untouched (it stays in the NestJS backend).
-- The NestJS backend can select this service explicitly over HTTP (see
-  [Integración NestJS](#integración-nestjs)) - always an opt-in, never a fallback.
+- The NestJS backend can select this service explicitly (see
+  [Integración NestJS](#integración-nestjs)); use HTTPS in production and HTTP
+  only for local development - always an opt-in, never a fallback.
 - Fail-closed: a degraded input can never approve a match.
 - PII-safe: images travel as **base64 payloads, never URLs**, and no
   image, embedding or base64 content is ever logged or persisted.
@@ -38,7 +39,7 @@ backend/face-service/
 
 ## Install
 
-Python 3.9+ (tested on 3.13):
+Python 3.12.8 en Render; para desarrollo use una versión compatible.
 
 ```bash
 python3 -m venv .venv
@@ -51,9 +52,8 @@ The unit tests are dependency-light by design (mocked model, no weights):
 installing only `pytest` is enough to run them, even on a machine where
 `insightface`/`onnxruntime` cannot be installed.
 
-> The InsightFace `buffalo_l` model weights are downloaded **the first
-> time a request runs** (into `~/.insightface/models`), never at import
-> and never during tests.
+> El build de Render descarga `buffalo_sc` en `INSIGHTFACE_ROOT`; el disco
+> local es efímero y el modelo se vuelve a descargar después de un redeploy.
 
 # Run
 
@@ -66,17 +66,22 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 The backend selects the face verification provider explicitly through
 environment configuration. Selecting `face_service` routes the facial
-verification of every KYC job to this service over HTTP; the default
-remains `local` (Human/TFJS, in-process). These are explicit selections
-only - there is no automatic routing and no fallback.
+verification of every KYC job to this service over HTTPS in production or HTTP
+only for local development; the default remains `local` (Human/TFJS,
+in-process). These are explicit selections only - there is no automatic
+routing and no fallback.
 
 | Backend variable             | Default                | Meaning                                                        |
 | ---------------------------- | ---------------------- | -------------------------------------------------------------- |
 | `FACE_VERIFICATION_PROVIDER` | `local`                | `local` or `face_service` (this service)                       |
-| `FACE_SERVICE_URL`           | `http://localhost:8000` | Base URL of this service                                       |
+| `FACE_SERVICE_URL`           | `http://localhost:8000` | Base URL; HTTPS in production, HTTP only for local development |
 | `FACE_SERVICE_TIMEOUT_MS`    | `30000`                | Per-request timeout, bounded to 1000-120000 ms                 |
+| `FACE_API_KEY`                | none                    | Obligatoria para ambos servicios; se transmite sólo como `X-API-Key` |
 
 Run both without Docker:
+
+The HTTP commands below are for local development only. Production
+deployments must configure an HTTPS `FACE_SERVICE_URL`.
 
 ```bash
 # terminal 1 - face service
@@ -108,6 +113,7 @@ degradation.
 | `FACE_MIN_WIDTH_PX`              | `100`      | Minimum face width in px; strictly below is `face_resolution_too_small` |
 | `FACE_DET_SIZE`                  | `640,640`  | SCRFD detection resolution (`W,H`)                                   |
 | `INSIGHTFACE_MODEL`              | `buffalo_l`| InsightFace model zoo name                                           |
+| `INSIGHTFACE_ROOT`               | `~/.insightface` | Directorio de modelos; en Render use el workspace efímero del servicio |
 
 ## API
 
@@ -185,6 +191,7 @@ Example:
 ```bash
 curl -s -X POST http://localhost:8000/face/compare \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: <backend-only-key>" \
   -d '{"document_face": "<base64>", "selfie": "<base64>"}'
 ```
 
@@ -204,7 +211,11 @@ pytest        # mocked model, no weights, no network
 ## Limitations
 
 - Single best face per image; multi-face handling is out of scope.
-- No auth, TLS termination or rate limiting (expected to be fronted by
-  the NestJS backend when wired in).
+- `/face/quality` y `/face/compare` requieren `FACE_API_KEY`; sin clave el
+  servicio responde 503 y una clave ausente o incorrecta responde 401.
+  `/health` permanece público y no revela secretos. No usa CORS: el frontend
+  nunca llama a este servicio.
+- Render free duerme por inactividad, PostgreSQL free vence a los 30 días y
+  el media/modelo local es efímero. La API key nunca se publica al frontend.
 - `FaceAnalysis.prepare(ctx_id=0)` uses the default InsightFace backend
   (onnxruntime; CPU when no GPU is available).

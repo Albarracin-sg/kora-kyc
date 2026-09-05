@@ -1,10 +1,10 @@
 # Kora KYC
 
-Kora KYC es una prueba técnica que presenta un MVP móvil de verificación de identidad. Permite que una persona cree una sesión, se autentique, capture su cédula y una selfie, y reciba un resultado de validación documental mediante un proveedor configurado en backend y comparación facial local. El objetivo es mostrar una base técnica clara para un flujo KYC, no sustituir una plataforma de cumplimiento normativo ni un proveedor de identidad de producción.
+Kora KYC es una prueba técnica que presenta un MVP móvil de verificación de identidad. Permite que una persona cree una sesión, se autentique, capture su cédula y una selfie, y reciba un resultado de validación documental mediante un proveedor configurado en backend y comparación facial local o delegada a `face_service`. El objetivo es mostrar una base técnica clara para un flujo KYC, no sustituir una plataforma de cumplimiento normativo ni un proveedor de identidad de producción.
 
 ## Alcance del MVP
 
-El problema abordado es la verificación inicial de identidad en una aplicación móvil con una integración documental externa controlada desde el backend y sin infraestructura AWS. El MVP cubre captura guiada, extracción estructurada de documento, comparación facial local, persistencia del caso y consulta de su resultado.
+El problema abordado es la verificación inicial de identidad en una aplicación móvil con una integración documental externa controlada desde el backend y sin infraestructura AWS. El MVP cubre captura guiada, extracción estructurada de documento, comparación facial local o remota mediante `face_service`, persistencia del caso y consulta de su resultado.
 
 Quedan fuera del alcance la prueba de vida, la detección de suplantación, la autenticidad documental certificada y la decisión regulatoria final.
 
@@ -14,7 +14,7 @@ Quedan fuera del alcance la prueba de vida, la detección de suplantación, la a
 - Creación y seguimiento de un caso KYC por usuario.
 - Captura de la cédula por ambos lados (frente y reverso) con cámara trasera y selfie con cámara frontal.
 - Extracción estructurada y validación documental de cédulas mediante un proveedor configurado exclusivamente en el backend.
-- Detección facial, generación de embeddings y comparación facial locales.
+- Comparación facial con Human/TFJS local o mediante el `face_service` explícitamente configurado.
 - Estados explícitos del proceso y resultado consultable desde el perfil.
 - Almacenamiento privado de imágenes y validaciones de archivos antes de procesarlos.
 - Documentación de la API autoservida con Scalar sobre el esquema OpenAPI del backend.
@@ -67,25 +67,25 @@ La raíz es un punto de documentación y coordinación, no un workspace de Node.
 3. **Inicio del caso:** la persona crea un caso KYC, inicialmente en estado `CREATED`.
 4. **Captura de cédula:** concede permiso de cámara, captura el frente de la cédula, luego el reverso, y los carga; si el backend acepta los archivos el caso pasa a `DOCUMENT_UPLOADED`.
 5. **Captura de selfie:** captura la selfie con la cámara frontal; el caso pasa a `SELFIE_UPLOADED`.
-6. **Procesamiento:** el backend inicia la validación en `VALIDATING`, valida la respuesta estructurada del proveedor documental configurado para la cédula y ejecuta detección facial y comparación facial local.
+6. **Procesamiento:** el backend inicia la validación en `VALIDATING`, valida la respuesta estructurada del proveedor documental configurado para la cédula y ejecuta detección facial y comparación facial local o mediante `face_service`, según la configuración.
 7. **Estados finales:** el proceso concluye en `APPROVED`, `REJECTED`, `NEEDS_REVIEW` o `PROCESSING_FAILED`. Todos son terminales.
 8. **Resultado y perfil:** la aplicación consulta el estado y presenta el resultado del caso en el perfil de la persona autenticada.
 
-## Procesamiento documental, IA local y comportamiento de fallo cerrado
+## Procesamiento documental, IA y comportamiento de fallo cerrado
 
-El procesamiento de identidad se realiza en el backend con componentes documentales externos y biometría local:
+El procesamiento de identidad se realiza en el backend con un proveedor documental configurado y una comparación facial local o remota:
 
 | Componente | Responsabilidad |
 |---|---|
 | Proveedor documental configurado | Extrae campos estructurados y evalúa la legibilidad documental de la cédula mediante una credencial exclusiva del backend. Gemini permanece como predeterminado; Hugging Face exige selección y configuración explícitas. |
 | Human con TensorFlow.js | Detecta rostros y genera embeddings faciales. |
-| Comparación facial | Compara los embeddings del documento y la selfie según la configuración del backend. |
+| Comparación facial | Compara los embeddings del documento y la selfie localmente con Human/TFJS o, si se selecciona `face_service`, delega la comparación al servicio facial remoto. |
 
-La imagen de la cédula se transmite únicamente al proveedor documental configurado. La selfie no se transmite a ese proveedor y permanece en la comparación facial local. La persona debe otorgar consentimiento informado visible o contractual antes del envío; el texto debe describir “proveedor documental configurado” sin prometer condiciones de retención. La operación debe evaluar los requisitos aplicables de privacidad y transferencia de datos. Las credenciales se configuran sólo en `backend/.env` o en el gestor seguro de secretos; nunca llegan al frontend, logs, base de datos o respuestas HTTP. `KYC_DOCUMENT_PROVIDER=gemini` mantiene Gemini como opción predeterminada, `KYC_DOCUMENT_PROVIDER=huggingface` exige token y modelo/proveedor explícitos, y `KYC_DOCUMENT_PROVIDER=local` habilita Tesseract sólo de forma explícita para desarrollo o pruebas. Consulte la [guía del backend](./backend/README.md) para el procedimiento de activación seguro.
+Un proveedor documental externo (Gemini o Hugging Face) puede recibir únicamente las imágenes JPEG normalizadas de cédula etiquetadas `FRONT`, `BACK` o `COMBINED`; nunca recibe la selfie. Cuando la comparación facial es local, la selfie permanece en Human/TFJS dentro del backend. Cuando se selecciona `FACE_VERIFICATION_PROVIDER=face_service`, el backend envía por HTTPS al servicio facial remoto únicamente la imagen `FRONT` o `COMBINED` confirmada por el proveedor documental, junto con la selfie; nunca envía `BACK`. Si cualquiera de los dos proveedores es externo, la app solicita consentimiento explícito para `remote-verification-v2` antes de iniciar la captura. La operación debe evaluar los requisitos aplicables de privacidad y transferencia de datos. Las credenciales se configuran sólo en `backend/.env` o en el gestor seguro de secretos; nunca llegan al frontend, logs, base de datos o respuestas HTTP. `KYC_DOCUMENT_PROVIDER=gemini` mantiene Gemini como opción predeterminada, `KYC_DOCUMENT_PROVIDER=huggingface` exige token y modelo/proveedor explícitos, y `KYC_DOCUMENT_PROVIDER=local` habilita Tesseract sólo de forma explícita para desarrollo o pruebas. Consulte la [guía del backend](./backend/README.md) para el procedimiento de activación seguro.
 
 Los assets de Human/TFJS se preparan mediante el backend y se validan con un manifiesto de checksums. Si falta un asset, su integridad no es válida, el proveedor documental devuelve una respuesta inválida, una imagen no puede procesarse o una comprobación requerida falla, el caso termina como error o resultado no aprobatorio. No existe una ruta de degradación que apruebe el caso automáticamente.
 
-El face matching es local por defecto (Human/TFJS) y puede delegarse a `face_service` según la configuración del backend. No implementa liveness, detección anti-spoofing ni una aprobación biométrica certificada. Ningún proveedor documental se usa para aprobar biometría facial.
+El face matching es local por defecto (Human/TFJS) y puede delegarse a `face_service` según la configuración del backend. En el modo remoto sólo se transmite `FRONT` o `COMBINED` junto con la selfie; `BACK` nunca se envía al servicio facial. No implementa liveness, detección anti-spoofing ni una aprobación biométrica certificada. Ningún proveedor documental se usa para aprobar biometría facial.
 
 ## Seguridad y privacidad
 
@@ -149,10 +149,10 @@ Docker y Docker Compose no se ejecutaron como parte de esta entrega por decisió
 
 ## Guion breve para una demo de entrevista
 
-1. Presentar el problema: una validación de identidad móvil con proveedor documental configurable, biometría local y controles explícitos de privacidad.
+1. Presentar el problema: una validación de identidad móvil con proveedor documental configurable, comparación facial local o remota y controles explícitos de privacidad.
 2. Registrar una cuenta o iniciar sesión y crear un caso KYC.
 3. Mostrar la captura guiada de la cédula y la selfie, incluyendo el permiso de cámara.
-4. Explicar la transición de estados, la extracción documental exclusivamente en backend con proveedor explícitamente configurado y los embeddings faciales locales.
+4. Explicar la transición de estados, la extracción documental exclusivamente en backend con proveedor explícitamente configurado y la comparación facial local o remota según configuración.
 5. Consultar el resultado desde el perfil y destacar que el backend impone la propiedad por usuario y el comportamiento de fallo cerrado.
 6. Cerrar con los límites del MVP y las mejoras requeridas para un entorno productivo.
 

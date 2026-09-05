@@ -103,6 +103,7 @@ export interface AppConfiguration {
   faceVerificationProvider: FaceVerificationProviderName;
   faceServiceUrl: string;
   faceServiceTimeoutMs: number;
+  faceApiKey: string;
   geminiApiKey: string | null;
   geminiModel: string;
   huggingFaceApiToken: string | null;
@@ -291,6 +292,18 @@ function readFaceServiceUrl(environment: NodeJS.ProcessEnv): string {
   return rawValue.replace(/\/+$/, "");
 }
 
+function readFaceApiKey(
+  environment: NodeJS.ProcessEnv,
+  faceVerificationProvider: FaceVerificationProviderName,
+): string {
+  const apiKey = environment.FACE_API_KEY?.trim() || "";
+  if (faceVerificationProvider === FACE_VERIFICATION_PROVIDER.FACE_SERVICE && !apiKey) {
+    throw new Error("FACE_API_KEY is required when FACE_VERIFICATION_PROVIDER=face_service");
+  }
+
+  return apiKey;
+}
+
 function readGeminiApiKey(
   environment: NodeJS.ProcessEnv,
   documentProvider: KycDocumentProvider,
@@ -350,6 +363,7 @@ export function createAppConfiguration(
   );
   const assetsRoot = resolve(workingDirectory, environment.KYC_ASSETS_ROOT ?? "assets");
   const documentProvider = readDocumentProvider(environment);
+  const faceVerificationProvider = readFaceVerificationProvider(environment);
 
   return {
     environment: readEnvironment(environment),
@@ -423,7 +437,7 @@ export function createAppConfiguration(
     ),
     documentHashPepper: requiredEnvironmentValue(environment, "KYC_DOCUMENT_HASH_PEPPER"),
     documentProvider,
-    faceVerificationProvider: readFaceVerificationProvider(environment),
+    faceVerificationProvider,
     faceServiceUrl: readFaceServiceUrl(environment),
     faceServiceTimeoutMs: readBoundedPositiveInteger(
       environment,
@@ -432,6 +446,7 @@ export function createAppConfiguration(
       FACE_SERVICE_TIMEOUT.minimumMs,
       FACE_SERVICE_TIMEOUT.maximumMs,
     ),
+    faceApiKey: readFaceApiKey(environment, faceVerificationProvider),
     geminiApiKey: readGeminiApiKey(environment, documentProvider),
     geminiModel: environment.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
     huggingFaceApiToken: readHuggingFaceApiToken(environment, documentProvider),

@@ -55,7 +55,11 @@ describe("createAppConfiguration face verification provider", () => {
 
   it("selects the face_service provider and keeps documented defaults", () => {
     const config = createAppConfiguration(
-      { ...baseEnvironment(), FACE_VERIFICATION_PROVIDER: FACE_VERIFICATION_PROVIDER.FACE_SERVICE },
+      {
+        ...baseEnvironment(),
+        FACE_VERIFICATION_PROVIDER: FACE_VERIFICATION_PROVIDER.FACE_SERVICE,
+        FACE_API_KEY: "test-face-api-key",
+      },
       process.cwd(),
     );
 
@@ -78,6 +82,7 @@ describe("createAppConfiguration face verification provider", () => {
       {
         ...baseEnvironment(),
         FACE_VERIFICATION_PROVIDER: FACE_VERIFICATION_PROVIDER.FACE_SERVICE,
+        FACE_API_KEY: "test-face-api-key",
         FACE_SERVICE_URL: "https://face.internal.example.com/",
       },
       process.cwd(),
@@ -92,6 +97,7 @@ describe("createAppConfiguration face verification provider", () => {
         {
           ...baseEnvironment(),
           FACE_VERIFICATION_PROVIDER: FACE_VERIFICATION_PROVIDER.FACE_SERVICE,
+          FACE_API_KEY: "test-face-api-key",
           FACE_SERVICE_URL: "ftp://face.internal",
         },
         process.cwd(),
@@ -105,10 +111,37 @@ describe("createAppConfiguration face verification provider", () => {
         {
           ...baseEnvironment(),
           FACE_VERIFICATION_PROVIDER: FACE_VERIFICATION_PROVIDER.FACE_SERVICE,
+          FACE_API_KEY: "test-face-api-key",
           FACE_SERVICE_TIMEOUT_MS: "1",
         },
         process.cwd(),
       ),
     ).toThrow("FACE_SERVICE_TIMEOUT_MS must be between 1000 and 120000");
+  });
+
+  it("rejects a remote face service without its required API key", () => {
+    expect(() =>
+      createAppConfiguration(
+        {
+          ...baseEnvironment(),
+          FACE_VERIFICATION_PROVIDER: FACE_VERIFICATION_PROVIDER.FACE_SERVICE,
+          FACE_API_KEY: " ",
+        },
+        process.cwd(),
+      ),
+    ).toThrow("FACE_API_KEY is required when FACE_VERIFICATION_PROVIDER=face_service");
+  });
+
+  it("reads an explicit FACE_API_KEY", () => {
+    const config = createAppConfiguration(
+      {
+        ...baseEnvironment(),
+        FACE_VERIFICATION_PROVIDER: FACE_VERIFICATION_PROVIDER.FACE_SERVICE,
+        FACE_API_KEY: "test-face-api-key",
+      },
+      process.cwd(),
+    );
+
+    expect(config.faceApiKey).toBe("test-face-api-key");
   });
 });

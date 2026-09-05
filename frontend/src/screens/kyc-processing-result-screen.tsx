@@ -16,7 +16,7 @@ import { COLORS, FONT, RADIUS, SPACING } from "../theme/theme";
 export function KycProcessingResultScreen(
   { navigation }: AppScreenProps<typeof APP_ROUTE.KYC_PROCESSING_RESULT>,
 ): ReactNode {
-  const { verification, refresh, start, verify } = useKyc();
+  const { verification, refresh, verify } = useKyc();
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const status = verification?.status;
@@ -65,8 +65,7 @@ export function KycProcessingResultScreen(
     setError(null);
     setIsSubmitting(true);
     try {
-      await start();
-      navigation.navigate(APP_ROUTE.DOCUMENT_SCAN);
+      navigation.navigate(APP_ROUTE.START_KYC);
     } catch (startError: unknown) {
       setError(toUserFacingError(startError));
     } finally {

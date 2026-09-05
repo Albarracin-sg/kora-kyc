@@ -24,6 +24,7 @@ const BASE_ENVIRONMENT: NodeJS.ProcessEnv = {
   KYC_DOCUMENT_HASH_PEPPER: "test-pepper",
   KYC_DOCUMENT_PROVIDER: "local",
   FACE_VERIFICATION_PROVIDER: FACE_VERIFICATION_PROVIDER.FACE_SERVICE,
+  FACE_API_KEY: "test-face-api-key",
 };
 
 const DOCUMENT_IMAGE = Buffer.from("synthetic-document-image");
@@ -148,8 +149,12 @@ function parseRequest(call: CapturedFetchCall | undefined): FaceServiceRequestBo
 
 function createProvider(
   fetchImplementation: FaceServiceFetch,
+  environment: NodeJS.ProcessEnv = {},
 ): FaceServiceVerificationProvider {
-  const configuration = createAppConfiguration(BASE_ENVIRONMENT, process.cwd());
+  const configuration = createAppConfiguration(
+    { ...BASE_ENVIRONMENT, ...environment },
+    process.cwd(),
+  );
   return new FaceServiceVerificationProvider({ values: configuration }, fetchImplementation);
 }
 
@@ -178,8 +183,14 @@ describe("Face service verification provider", () => {
     expect(compareCall?.input).toBe(`http://localhost:8000${FACE_SERVICE_COMPARE_PATH}`);
     expect(qualityCall?.init.method).toBe("POST");
     expect(compareCall?.init.method).toBe("POST");
-    expect(qualityCall?.init.headers).toEqual({ "Content-Type": "application/json" });
-    expect(compareCall?.init.headers).toEqual({ "Content-Type": "application/json" });
+    expect(qualityCall?.init.headers).toEqual({
+      "Content-Type": "application/json",
+      "X-API-Key": "test-face-api-key",
+    });
+    expect(compareCall?.init.headers).toEqual({
+      "Content-Type": "application/json",
+      "X-API-Key": "test-face-api-key",
+    });
 
     const expectedBody: FaceServiceRequestBody = {
       document_face: DOCUMENT_IMAGE.toString("base64"),
@@ -187,6 +198,26 @@ describe("Face service verification provider", () => {
     };
     expect(parseRequest(qualityCall)).toEqual(expectedBody);
     expect(parseRequest(compareCall)).toEqual(expectedBody);
+  });
+
+  it("sends an X-API-Key header on every call when FACE_API_KEY is set", async () => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(200, COMPARE_MATCH_RESPONSE),
+    );
+
+    await createProvider(fetchStub.fetch, { FACE_API_KEY: "test-face-api-key" }).verify(
+      DOCUMENT_IMAGE,
+      SELFIE_IMAGE,
+    );
+
+    expect(fetchStub.calls).toHaveLength(2);
+    for (const call of fetchStub.calls) {
+      expect(call.init.headers).toEqual({
+        "Content-Type": "application/json",
+        "X-API-Key": "test-face-api-key",
+      });
+    }
   });
 
   it("returns a match with cosine similarity and its equivalent distance", async () => {

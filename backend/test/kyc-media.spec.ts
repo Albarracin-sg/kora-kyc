@@ -58,7 +58,12 @@ function createServiceWithImageRow(row: unknown): ServiceMocks {
   } as unknown as FileStorage;
 
   return {
-    service: new KycService(prismaService, imageNormalizationService, fileStorage),
+    service: new KycService(
+      prismaService,
+      imageNormalizationService,
+      fileStorage,
+      { values: { documentProvider: "local", faceVerificationProvider: "local" } } as never,
+    ),
     findUnique,
     read,
   };

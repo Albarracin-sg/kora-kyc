@@ -16,6 +16,7 @@ import type {
   AuthenticatedUser,
   DocumentSide,
   KycVerification,
+  KycConsentRequirements,
   UserProfile,
 } from "../types/api";
 
@@ -648,8 +649,16 @@ export class KoraApiClient {
     return this.request<UserProfile>("/users/me", { method: "GET" });
   }
 
-  async startKyc(): Promise<KycVerification> {
-    return this.request<KycVerification>("/kyc/start", { method: "POST" });
+  async startKyc(consentVersion?: string): Promise<KycVerification> {
+    return this.request<KycVerification>("/kyc/start", {
+      method: "POST",
+      body: JSON.stringify(consentVersion ? { consentVersion } : {}),
+      contentType: "application/json",
+    });
+  }
+
+  async getKycConsentRequirements(): Promise<KycConsentRequirements> {
+    return this.request<KycConsentRequirements>("/kyc/consent-requirements", { method: "GET" });
   }
 
   async uploadDocument(uri: string, side: DocumentSide): Promise<KycVerification> {

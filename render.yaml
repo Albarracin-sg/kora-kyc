@@ -1,0 +1,98 @@
+# Render Blueprint — Kora KYC (hobby / free tier)
+#
+# Cómo usar:
+#   1. Conectar el repo https://github.com/Albarracin-sg/kora-kyc en Render.
+#   2. New -> Blueprint -> elegir el repo -> Render crea los 3 recursos
+#      (kora-backend, kora-face-service, kora-postgres).
+#   3. En el dashboard, setear los secrets marcados `sync: false`
+#      (JWT_SECRET, KYC_DOCUMENT_HASH_PEPPER, HUGGINGFACE_API_TOKEN y
+#      GEMINI_API_KEY) y redeployar. FACE_API_KEY se genera una sola vez en
+#      el grupo compartido; nunca se expone al frontend.
+#
+# Limitaciones conocidas del plan free:
+#   - Postgres free expira a los 30 días.
+#   - Sin disco persistente: las imágenes subidas se pierden en cada deploy.
+#   - Los web services free duermen tras inactividad (cold start ~1 min).
+#   - La API key es sólo server-to-server; el frontend nunca llama al face-service.
+
+envVarGroups:
+  - name: kora-face-service-auth
+    envVars:
+      - key: FACE_API_KEY
+        generateValue: true
+
+services:
+  - type: web
+    name: kora-backend
+    runtime: docker
+    plan: free
+    region: oregon
+    # Docker paths are relative to the repository root: context=backend.
+    dockerContext: backend
+    dockerfilePath: backend/infra/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kora-postgres
+          property: connectionString
+      - key: FACE_SERVICE_URL
+        value: https://kora-face-service.onrender.com
+      - fromGroup: kora-face-service-auth
+      - key: FACE_SERVICE_TIMEOUT_MS
+        value: "120000"
+      - key: KYC_DOCUMENT_PROVIDER
+        value: huggingface
+      - key: HUGGINGFACE_API_TOKEN
+        sync: false
+      - key: HUGGINGFACE_DOCUMENT_MODEL
+        value: Qwen/Qwen2.5-VL-72B-Instruct:ovhcloud
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FACE_VERIFICATION_PROVIDER
+        value: face_service
+      - key: KYC_FACE_MIN_SIMILARITY
+        value: "0.72"
+      - key: KYC_FACE_MAX_DISTANCE
+        value: "0.85"
+      - key: KYC_FACE_MIN_CONFIDENCE
+        value: "0.65"
+      - key: JWT_SECRET
+        sync: false
+      - key: KYC_DOCUMENT_HASH_PEPPER
+        sync: false
+      - key: CORS_ORIGINS
+        # Temporary Hobby default for native/mobile clients. Credentials stay disabled in Nest.
+        value: "*"
+
+  - type: web
+    name: kora-face-service
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend/face-service
+    buildCommand: ./build.sh buffalo_sc
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: kora-face-service-auth
+      - key: PYTHON_VERSION
+        # Render supports released versions from 3.7.3 onward; use this exact 3.12 release.
+        value: "3.12.8"
+      - key: INSIGHTFACE_MODEL
+        value: buffalo_sc
+      - key: INSIGHTFACE_ROOT
+        value: /opt/render/project/src/.insightface
+      - key: FACE_MATCH_THRESHOLD
+        value: "0.40"
+      - key: FACE_HIGH_CONFIDENCE_THRESHOLD
+        value: "0.60"
+      - key: FACE_BLUR_THRESHOLD
+        value: "25.0"
+      - key: FACE_MIN_WIDTH_PX
+        value: "100"
+
+databases:
+  - name: kora-postgres
+    plan: free
+    region: oregon

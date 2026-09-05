@@ -1,0 +1,82 @@
+"""API key guard tests for the face service.
+
+Runs against the FastAPI app via TestClient. The analytics endpoints
+(`/face/quality`, `/face/compare`) always require a configured X-API-Key;
+`/health` never requires it.
+"""
+import pytest
+
+pytest.importorskip("httpx")
+
+from fastapi.testclient import TestClient
+from app.config import get_settings
+from app.main import app
+
+PROTECTED_ENDPOINTS = ("/face/quality", "/face/compare")
+PUBLIC_DOCUMENTATION_ENDPOINTS = ("/docs", "/redoc", "/openapi.json")
+PAYLOAD = {"document_face": "x", "selfie": "x"}
+
+
+@pytest.fixture(autouse=True)
+def _reset_settings_cache(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.main.get_analyzer", lambda: None)
+    yield
+    get_settings.cache_clear()
+
+
+def _request(client: TestClient, endpoint: str, headers: dict[str, str] | None = None):
+    return client.post(endpoint, json=PAYLOAD, headers=headers)
+
+
+def test_health_never_requires_api_key(monkeypatch):
+    monkeypatch.setenv("FACE_API_KEY", "test-face-api-key")
+
+    response = TestClient(app).get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+@pytest.mark.parametrize("endpoint", PUBLIC_DOCUMENTATION_ENDPOINTS)
+def test_public_documentation_endpoints_are_disabled(endpoint):
+    response = TestClient(app).get(endpoint)
+
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("endpoint", PROTECTED_ENDPOINTS)
+@pytest.mark.parametrize("headers", [None, {"X-API-Key": "invalid-test-key"}])
+def test_protected_endpoints_reject_missing_or_invalid_api_keys(monkeypatch, endpoint, headers):
+    monkeypatch.setenv("FACE_API_KEY", "test-face-api-key")
+
+    response = _request(TestClient(app), endpoint, headers)
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("endpoint", PROTECTED_ENDPOINTS)
+def test_protected_endpoints_accept_the_configured_api_key(monkeypatch, endpoint):
+    monkeypatch.setenv("FACE_API_KEY", "test-face-api-key")
+
+    response = _request(
+        TestClient(app),
+        endpoint,
+        headers={"X-API-Key": "test-face-api-key"},
+    )
+
+    # The guard passes; the endpoint then fails closed on invalid test images.
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("endpoint", PROTECTED_ENDPOINTS)
+def test_protected_endpoints_fail_safely_when_api_key_is_unset(monkeypatch, endpoint):
+    monkeypatch.delenv("FACE_API_KEY", raising=False)
+
+    response = _request(TestClient(app), endpoint)
+    assert response.status_code == 503
+
+
+def test_blank_api_key_fails_safely(monkeypatch):
+    monkeypatch.setenv("FACE_API_KEY", "   ")
+
+    response = _request(TestClient(app), "/face/quality")
+    assert response.status_code == 503

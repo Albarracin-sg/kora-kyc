@@ -9,8 +9,8 @@
  *   brute-force surface and get the strictest limit.
  * - `kyc`: the authenticated document/selfie upload endpoints. They accept
  *   multipart bodies and get a moderate limit to prevent repeated abuse.
- * - `general`: every other authenticated endpoint (for example the user
- *   profile).
+ * - `general`: every other endpoint (for example the public health check or
+ *   authenticated user profile).
  */
 
 export const ROUTE = {

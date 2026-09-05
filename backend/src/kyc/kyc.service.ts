@@ -9,6 +9,11 @@ import {
 import type { KycImage, KycVerification } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type { AuthenticatedUser } from "../common/types/authenticated-user";
+import {
+  AppConfigService,
+  FACE_VERIFICATION_PROVIDER,
+  KYC_DOCUMENT_PROVIDER,
+} from "../config/app-config.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { ImageNormalizationService } from "./image/image-normalization.service";
 import { KYC_IMAGE_KIND, type KycImageKind } from "./domain/kyc-image-kind";
@@ -18,6 +23,7 @@ import {
   type KycStatus,
 } from "./domain/kyc-state";
 import { DOCUMENT_SIDE, type DocumentSide } from "./domain/document-side";
+import { REMOTE_BIOMETRIC_CONSENT_VERSION } from "./domain/remote-biometric-consent";
 import { KYC_TOKENS } from "./kyc.tokens";
 import type { FileStorage } from "./storage/file-storage.port";
 
@@ -73,6 +79,11 @@ export interface KycPublicVerification {
   images: KycImageMetadata[];
 }
 
+export interface KycConsentRequirements {
+  requiresExternalProcessing: boolean;
+  consentVersion: string | null;
+}
+
 interface KycVerificationWithImages extends KycVerification {
   images: KycImage[];
 }
@@ -83,9 +94,11 @@ export class KycService {
     private readonly prismaService: PrismaService,
     private readonly imageNormalizationService: ImageNormalizationService,
     @Inject(KYC_TOKENS.FILE_STORAGE) private readonly fileStorage: FileStorage,
+    private readonly configService: AppConfigService,
   ) {}
 
-  async start(user: AuthenticatedUser): Promise<KycPublicVerification> {
+  async start(user: AuthenticatedUser, consentVersion?: string): Promise<KycPublicVerification> {
+    this.assertRemoteVerificationConsent(consentVersion);
     const activeVerification = await this.prismaService.kycVerification.findFirst({
       where: {
         userId: user.id,
@@ -96,11 +109,29 @@ export class KycService {
     });
 
     if (activeVerification) {
+      if (this.requiresExternalProcessing() && !this.hasCurrentConsent(activeVerification)) {
+        const updatedVerification = await this.prismaService.kycVerification.update({
+          where: { id: activeVerification.id },
+          data: {
+            consentVersion: REMOTE_BIOMETRIC_CONSENT_VERSION,
+            consentAcceptedAt: new Date(),
+          },
+          include: { images: true },
+        });
+        return this.toPublicVerification(updatedVerification);
+      }
       return this.toPublicVerification(activeVerification);
     }
 
     const verification = await this.prismaService.kycVerification.create({
-      data: { userId: user.id, status: KYC_STATUS.CREATED },
+      data: this.requiresExternalProcessing()
+        ? {
+            userId: user.id,
+            status: KYC_STATUS.CREATED,
+            consentVersion: REMOTE_BIOMETRIC_CONSENT_VERSION,
+            consentAcceptedAt: new Date(),
+          }
+        : { userId: user.id, status: KYC_STATUS.CREATED },
       include: { images: true },
     });
 
@@ -124,6 +155,8 @@ export class KycService {
     if (!verification) {
       throw new NotFoundException("Start a KYC verification before requesting validation");
     }
+
+    this.assertVerificationHasRemoteBiometricConsent(verification);
 
     const currentStatus = verification.status as KycStatus;
     if (currentStatus === KYC_STATUS.VALIDATING) {
@@ -197,6 +230,13 @@ export class KycService {
     return verification ? this.toPublicVerification(verification) : null;
   }
 
+  getConsentRequirements(): KycConsentRequirements {
+    return {
+      requiresExternalProcessing: this.requiresExternalProcessing(),
+      consentVersion: this.requiresExternalProcessing() ? REMOTE_BIOMETRIC_CONSENT_VERSION : null,
+    };
+  }
+
   async readOwnedMedia(user: AuthenticatedUser, mediaId: string): Promise<OwnedMedia> {
     if (!MEDIA_ID_PATTERN.test(mediaId)) {
       throw new BadRequestException("Invalid media identifier");
@@ -237,6 +277,8 @@ export class KycService {
     if (!verification) {
       throw new NotFoundException("Start a KYC verification before uploading an image");
     }
+
+    this.assertVerificationHasRemoteBiometricConsent(verification);
 
     this.assertUploadAllowed(verification.status as KycStatus, kind);
     const normalizedImage = await this.imageNormalizationService.normalize(upload);
@@ -397,6 +439,36 @@ export class KycService {
     if (!documentUploadAllowed && !selfieUploadAllowed) {
       throw new ConflictException("This image cannot be uploaded in the current KYC state");
     }
+  }
+
+  private isRemoteFaceService(): boolean {
+    return this.configService.values.faceVerificationProvider === FACE_VERIFICATION_PROVIDER.FACE_SERVICE;
+  }
+
+  private requiresExternalProcessing(): boolean {
+    return (
+      this.configService.values.documentProvider !== KYC_DOCUMENT_PROVIDER.LOCAL ||
+      this.isRemoteFaceService()
+    );
+  }
+
+  private assertRemoteVerificationConsent(consentVersion: string | undefined): void {
+    if (this.requiresExternalProcessing() && consentVersion !== REMOTE_BIOMETRIC_CONSENT_VERSION) {
+      throw new ConflictException("Remote verification consent is required before starting KYC");
+    }
+  }
+
+  private assertVerificationHasRemoteBiometricConsent(verification: KycVerification): void {
+    if (this.requiresExternalProcessing() && !this.hasCurrentConsent(verification)) {
+      throw new ConflictException("Remote verification consent is required before continuing KYC");
+    }
+  }
+
+  private hasCurrentConsent(verification: Pick<KycVerification, "consentVersion" | "consentAcceptedAt">): boolean {
+    return (
+      verification.consentVersion === REMOTE_BIOMETRIC_CONSENT_VERSION &&
+      verification.consentAcceptedAt instanceof Date
+    );
   }
 
   private async findCurrentVerification(userId: string): Promise<KycVerificationWithImages | null> {

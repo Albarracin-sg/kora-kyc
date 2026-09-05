@@ -60,6 +60,8 @@ function createVerification(): KycVerification {
     documentProviderModel: null,
     faceDistance: null,
     faceSimilarity: null,
+    consentVersion: null,
+    consentAcceptedAt: null,
     frontPresent: true,
     backPresent: true,
     createdAt: new Date(),

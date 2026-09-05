@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
 import { koraApiClient } from "../services/api-client";
-import type { DocumentSide, KycVerification } from "../types/api";
+import type { DocumentSide, KycConsentRequirements, KycVerification } from "../types/api";
 import { useAuth } from "./auth-context";
 
 interface KycContextValue {
@@ -8,7 +8,8 @@ interface KycContextValue {
   isLoading: boolean;
   isHydrated: boolean;
   refresh(): Promise<void>;
-  start(): Promise<KycVerification>;
+  start(consentVersion?: string): Promise<KycVerification>;
+  getConsentRequirements(): Promise<KycConsentRequirements>;
   uploadDocument(uri: string, side: DocumentSide): Promise<KycVerification>;
   uploadSelfie(uri: string): Promise<KycVerification>;
   verify(): Promise<KycVerification>;
@@ -60,11 +61,16 @@ export function KycProvider({ children }: KycProviderProps): ReactNode {
     }
   }
 
-  async function start(): Promise<KycVerification> {
+  async function start(consentVersion?: string): Promise<KycVerification> {
     requireToken();
-    const nextVerification = await koraApiClient.startKyc();
+    const nextVerification = await koraApiClient.startKyc(consentVersion);
     setVerification(nextVerification);
     return nextVerification;
+  }
+
+  async function getConsentRequirements(): Promise<KycConsentRequirements> {
+    requireToken();
+    return koraApiClient.getKycConsentRequirements();
   }
 
   async function uploadDocument(uri: string, side: DocumentSide): Promise<KycVerification> {
@@ -94,6 +100,7 @@ export function KycProvider({ children }: KycProviderProps): ReactNode {
     isHydrated,
     refresh,
     start,
+    getConsentRequirements,
     uploadDocument,
     uploadSelfie,
     verify,

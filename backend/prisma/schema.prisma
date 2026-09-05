@@ -79,6 +79,8 @@ model KycVerification {
   documentProviderModel String?
   faceDistance          Float?
   faceSimilarity        Float?
+  consentVersion        String?
+  consentAcceptedAt     DateTime?
   frontPresent          Boolean            @default(false)
   backPresent           Boolean            @default(false)
   createdAt             DateTime           @default(now())

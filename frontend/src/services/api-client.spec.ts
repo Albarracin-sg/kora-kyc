@@ -155,6 +155,40 @@ describe("KoraApiClient", () => {
     expect(requestConfig?.headers.get("Authorization")).toBe("Bearer access-token");
   });
 
+  it("sends the accepted remote biometric consent version only to the backend KYC start endpoint", async () => {
+    setSessionTokens({ accessToken: "test-token", refreshToken: "refresh-token" });
+    let requestConfig: InternalAxiosRequestConfig | undefined;
+    installAdapter(apiClient, async (config) => {
+      requestConfig = config;
+      return responseWithPayload(config, { status: "CREATED" });
+    });
+
+    await new KoraApiClient().startKyc("remote-verification-v2");
+
+    expect(requestConfig?.url).toBe("/kyc/start");
+    expect(requestConfig?.data).toBe(JSON.stringify({ consentVersion: "remote-verification-v2" }));
+    expect(requestConfig?.headers.get("Authorization")).toBe("Bearer test-token");
+  });
+
+  it("gets authenticated consent requirements from the backend", async () => {
+    setSessionTokens({ accessToken: "test-token", refreshToken: "refresh-token" });
+    let requestConfig: InternalAxiosRequestConfig | undefined;
+    installAdapter(apiClient, async (config) => {
+      requestConfig = config;
+      return responseWithPayload(config, {
+        requiresExternalProcessing: true,
+        consentVersion: "remote-verification-v2",
+      });
+    });
+
+    await expect(new KoraApiClient().getKycConsentRequirements()).resolves.toEqual({
+      requiresExternalProcessing: true,
+      consentVersion: "remote-verification-v2",
+    });
+    expect(requestConfig?.url).toBe("/kyc/consent-requirements");
+    expect(requestConfig?.headers.get("Authorization")).toBe("Bearer test-token");
+  });
+
   it("preserves safe metadata when the network request fails", async () => {
     setSessionTokens({ accessToken: FRESH_TOKEN, refreshToken: "refresh-token" });
     installAdapter(apiClient, async (config) => {

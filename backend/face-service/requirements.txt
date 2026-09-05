@@ -2,9 +2,9 @@
 # Install with: pip install -r requirements.txt
 fastapi>=0.111
 uvicorn[standard]>=0.30
-opencv-python>=4.9
-numpy>=1.26
+opencv-python-headless>=4.9
+numpy==1.26.4
 # InsightFace/ArcFace (SCRFD detector) + ONNX Runtime (CPU).
 # Only needed at request time; the unit tests never import them.
-insightface>=0.7.3
+insightface==0.7.3
 onnxruntime>=1.17

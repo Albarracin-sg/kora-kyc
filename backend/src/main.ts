@@ -57,7 +57,8 @@ async function bootstrap(): Promise<void> {
     .setDescription(
       "API de verificacion de identidad KYC. " +
       "Permite gestionar casos de verificacion con captura de documento (cedula colombiana) y selfie. " +
-      "El procesamiento documental usa Gemini y la comparacion facial es local.",
+      "El proveedor documental es configurable (Gemini o Hugging Face) y la comparacion facial " +
+      "usa Human/TFJS local o un servicio facial externo.",
     )
     .setVersion("0.1.0")
     .addBearerAuth()

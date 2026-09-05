@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   Header,
@@ -20,7 +21,12 @@ import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import type { AuthenticatedUser } from "../common/types/authenticated-user";
 import { DOCUMENT_SIDE, type DocumentSide } from "./domain/document-side";
-import { KycService, type KycPublicVerification } from "./kyc.service";
+import type { StartKycDto } from "./dto/start-kyc.dto";
+import {
+  KycService,
+  type KycConsentRequirements,
+  type KycPublicVerification,
+} from "./kyc.service";
 
 const MULTIPART_LIMITS = {
   fileSize: 10 * 1024 * 1024,
@@ -37,8 +43,18 @@ export class KycController {
   @Post("start")
   @ApiOperation({ summary: "Start or resume a KYC verification" })
   @ApiResponse({ status: 201, description: "KYC verification created or resumed" })
-  async start(@CurrentUser() user: AuthenticatedUser): Promise<KycPublicVerification> {
-    return this.kycService.start(user);
+  async start(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: Partial<StartKycDto> = {},
+  ): Promise<KycPublicVerification> {
+    return this.kycService.start(user, body.consentVersion);
+  }
+
+  @Get("consent-requirements")
+  @ApiOperation({ summary: "Get the authenticated KYC consent requirements" })
+  @ApiResponse({ status: 200, description: "Current external processing requirement and consent version" })
+  consentRequirements(): KycConsentRequirements {
+    return this.kycService.getConsentRequirements();
   }
 
   @Post("document")

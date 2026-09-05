@@ -7,6 +7,7 @@ import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { AppThrottlerGuard } from "./common/guards/app-throttler.guard";
 import { SecurityThrottlerModule } from "./common/http/throttler.module";
 import { HttpLoggingInterceptor } from "./common/interceptors/http-logging.interceptor";
+import { HealthModule } from "./health/health.module";
 import { KycModule } from "./kyc/kyc.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { UsersModule } from "./users/users.module";
@@ -20,6 +21,7 @@ import { UsersModule } from "./users/users.module";
     AuthModule,
     UsersModule,
     KycModule,
+    HealthModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AppThrottlerGuard },
