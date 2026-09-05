@@ -1,0 +1,1 @@
+"""Koa face service: standalone facial comparison (quality gate + ArcFace)."""

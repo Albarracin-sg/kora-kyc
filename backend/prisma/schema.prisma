@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum KycStatus {
+  CREATED
+  DOCUMENT_UPLOADED
+  SELFIE_UPLOADED
+  VALIDATING
+  APPROVED
+  REJECTED
+  NEEDS_REVIEW
+  PROCESSING_FAILED
+}
+
+enum KycImageKind {
+  DOCUMENT
+  SELFIE
+}
+
+enum DocumentSide {
+  FRONT
+  BACK
+  COMBINED
+}
+
+enum KycJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id               String            @id @default(cuid())
+  email            String            @unique
+  passwordHash     String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  kycVerifications KycVerification[]
+  refreshTokens     RefreshToken[]
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt, revokedAt])
+}
+
+model KycVerification {
+  id                    String             @id @default(cuid())
+  userId                String
+  status                KycStatus          @default(CREATED)
+  rejectionCode         String?
+  documentType          String?
+  documentNumberHash    String?
+  documentFullName      String?
+  documentNumber        String?
+  documentBirthDate     DateTime?
+  documentIssueDate     DateTime?
+  documentSex           String?
+  documentHeight        String?
+  documentCheckResult   String?
+  documentOcrConfidence Float?
+  documentProvider      String?
+  documentProviderModel String?
+  faceDistance          Float?
+  faceSimilarity        Float?
+  frontPresent          Boolean            @default(false)
+  backPresent           Boolean            @default(false)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images                KycImage[]
+  processingJob         KycProcessingJob?
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model KycImage {
+  id             String       @id @default(cuid())
+  verificationId String
+  kind           KycImageKind
+  side           DocumentSide?
+  storageKey     String       @unique
+  mimeType       String
+  byteSize       Int
+  width          Int
+  height         Int
+  sha256         String
+  createdAt      DateTime     @default(now())
+  verification   KycVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+
+  @@unique([verificationId, kind, side])
+  @@index([verificationId])
+}
+
+model KycProcessingJob {
+  id             String       @id @default(cuid())
+  verificationId String       @unique
+  status         KycJobStatus @default(PENDING)
+  attempts       Int          @default(0)
+  lockedAt       DateTime?
+  lockToken      String?
+  completedAt    DateTime?
+  failureCode    String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  verification   KycVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+}

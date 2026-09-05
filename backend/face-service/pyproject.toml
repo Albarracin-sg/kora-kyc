@@ -1,0 +1,9 @@
+# Project metadata and pytest configuration for the Koa face service.
+#
+# The install path is plain `pip install -r requirements.txt` (see README).
+# This file intentionally has no [build-system]: the package is not meant
+# to be pip-installed as a distribution, only run from this directory.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

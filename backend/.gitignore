@@ -1,0 +1,14 @@
+node_modules/
+.pnpm-store/
+dist/
+.env
+data/private/
+upload/
+coverage/
+assets/manifest.json
+assets/tesseract/
+assets/human-models/
+*.log
+pnpm-debug.log*
+prisma/*.db
+prisma/*.db-journal

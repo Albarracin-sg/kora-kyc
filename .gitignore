@@ -1,0 +1,14 @@
+# Evitar secretos y PII en un repositorio público
+.env
+.env.*
+!.env.example
+
+# Fotos de prueba con datos documentales (PII) — no publicar
+frontend/assets/cc/
+
+# Redundancia raíz (cada app ya excluye lo propio en su .gitignore)
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store

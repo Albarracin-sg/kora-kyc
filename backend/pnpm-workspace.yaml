@@ -1,0 +1,26 @@
+overrides:
+  tar: ^7.5.21
+  adm-zip: ^0.6.0
+  deepmerge-ts: ^8.0.0
+allowBuilds:
+  '@google/genai': false
+  '@parcel/watcher': false
+  '@prisma/client': true
+  '@prisma/engines': true
+  '@scarf/scarf': false
+  '@tensorflow/tfjs-node': true
+  bcrypt: true
+  core-js: false
+  esbuild: true
+  prisma: true
+  protobufjs: false
+  tesseract.js: true
+  unrs-resolver: false
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - '@tensorflow/tfjs-node'
+  - bcrypt
+  - esbuild
+  - prisma
+  - tesseract.js

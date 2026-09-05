@@ -1,0 +1,7 @@
+# Koa face service - development (test) dependencies.
+#
+# The unit tests are dependency-light by design: they use a mocked model
+# and only require pytest. Install the full stack with
+# `pip install -r requirements.txt`, or just `pip install pytest` to run
+# the mocked test suite.
+pytest>=8.0

@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "Kora KYC",
+    "slug": "kora-kyc",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "kora",
+    "icon": "./assets/image.png",
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.kora.kyc",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Kora KYC usa la cámara para verificar su identidad mediante la captura de su documento y una selfie."
+      }
+    },
+    "android": {
+      "package": "com.kora.kyc",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/image.png",
+      "backgroundColor": "#020A08"
+      }
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Kora KYC usa la cámara para verificar su identidad mediante la captura de su documento y una selfie.",
+          "recordAudioAndroid": false
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-navigation-bar",
+        {
+          "style": "dark",
+          "enforceContrast": false
+        }
+      ],
+      [
+        "expo-status-bar",
+        {
+          "style": "light"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/image.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#020A08"
+        }
+      ]
+    ]
+  }
+}
