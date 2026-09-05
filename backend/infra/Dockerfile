@@ -2,6 +2,10 @@ FROM node:24-bookworm-slim AS build
 
 WORKDIR /app
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN npm install --global pnpm@11.3.0 && pnpm install --frozen-lockfile
 
@@ -18,6 +22,10 @@ ENV PORT=3000
 ENV LOCAL_STORAGE_ROOT=/app/data/private
 ENV KYC_ASSETS_ROOT=/app/assets
 ENV KYC_ASSET_MANIFEST_PATH=/app/assets/manifest.json
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/dist /app/dist
