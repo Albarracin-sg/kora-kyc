@@ -120,6 +120,39 @@ export interface KycVerification {
   images: KycImageMetadata[];
 }
 
+export interface KycHistoryItem {
+  id: string;
+  status: KycStatus;
+  finalizedAt: string;
+  faceSimilarity: number | null;
+}
+
+export interface KycHistoryList {
+  items: KycHistoryItem[];
+  nextCursor: string | null;
+}
+
+export interface KycHistoryImage {
+  id: string;
+  kind: KycImageKind;
+  side: DocumentSide | null;
+}
+
+export interface KycHistoryDetail extends KycHistoryItem {
+  reasonCode: string | null;
+  documentFullName: string | null;
+  documentNumber: string | null;
+  documentBirthDate: string | null;
+  documentIssueDate: string | null;
+  documentSex: string | null;
+  documentHeight: string | null;
+  documentBloodType: string | null;
+  documentBirthPlace: string | null;
+  documentCheckResult: DocumentCheckResult | null;
+  documentNationality: string | null;
+  images: KycHistoryImage[];
+}
+
 export interface ApiErrorPayload {
   message: string | string[] | undefined;
 }

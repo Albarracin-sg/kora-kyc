@@ -189,6 +189,23 @@ describe("KoraApiClient", () => {
     expect(requestConfig?.headers.get("Authorization")).toBe("Bearer test-token");
   });
 
+  it("requests the private history with an opaque cursor only in the authenticated header", async () => {
+    setSessionTokens({ accessToken: "test-token", refreshToken: "refresh-token" });
+    let requestConfig: InternalAxiosRequestConfig | undefined;
+    installAdapter(apiClient, async (config) => {
+      requestConfig = config;
+      return responseWithPayload(config, { items: [], nextCursor: null });
+    });
+
+    await expect(new KoraApiClient().getKycHistory("opaque-cursor")).resolves.toEqual({
+      items: [],
+      nextCursor: null,
+    });
+    expect(requestConfig?.url).toBe("/kyc/history?cursor=opaque-cursor");
+    expect(requestConfig?.headers.get("Authorization")).toBe("Bearer test-token");
+    expect(`${requestConfig?.url ?? ""}`).not.toContain("test-token");
+  });
+
   it("preserves safe metadata when the network request fails", async () => {
     setSessionTokens({ accessToken: FRESH_TOKEN, refreshToken: "refresh-token" });
     installAdapter(apiClient, async (config) => {

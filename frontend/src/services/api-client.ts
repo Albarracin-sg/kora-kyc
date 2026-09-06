@@ -17,6 +17,8 @@ import type {
   DocumentSide,
   KycVerification,
   KycConsentRequirements,
+  KycHistoryDetail,
+  KycHistoryList,
   UserProfile,
 } from "../types/api";
 
@@ -675,6 +677,15 @@ export class KoraApiClient {
 
   async getCurrentKyc(): Promise<KycVerification | null> {
     return this.request<KycVerification | null>("/kyc/current", { method: "GET" });
+  }
+
+  async getKycHistory(cursor?: string): Promise<KycHistoryList> {
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    return this.request<KycHistoryList>(`/kyc/history${query}`, { method: "GET" });
+  }
+
+  async getKycHistoryDetail(verificationId: string): Promise<KycHistoryDetail> {
+    return this.request<KycHistoryDetail>(`/kyc/history/${encodeURIComponent(verificationId)}`, { method: "GET" });
   }
 
   private async uploadImage(

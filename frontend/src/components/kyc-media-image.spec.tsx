@@ -2,6 +2,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react-nativ
 import { KycMediaImage } from "./kyc-media-image";
 import { getAuthenticatedMediaSource } from "../services/api-client";
 
+let mockIsFocused = true;
+
+jest.mock("@react-navigation/native", () => ({
+  useIsFocused: () => mockIsFocused,
+}));
+
 jest.mock("../services/api-client", () => ({
   getAuthenticatedMediaSource: jest.fn(),
 }));
@@ -37,6 +43,7 @@ async function resolveDocumentImage(): Promise<ReturnType<typeof screen.getByLab
 describe("KycMediaImage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockIsFocused = true;
   });
 
   it("shows the placeholder after two consecutive image errors", async () => {
@@ -79,5 +86,14 @@ describe("KycMediaImage", () => {
       );
     });
     expect(getAuthenticatedMediaSourceMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("releases the private data URI when the screen loses focus", async () => {
+    getAuthenticatedMediaSourceMock.mockResolvedValueOnce(FIRST_SOURCE);
+    const rendered = render(<KycMediaImage mediaId="media-1" accessibilityLabel={DOCUMENT_IMAGE_LABEL} />);
+    await resolveDocumentImage();
+    mockIsFocused = false;
+    rendered.rerender(<KycMediaImage mediaId="media-1" accessibilityLabel={DOCUMENT_IMAGE_LABEL} />);
+    expect(screen.queryByLabelText(DOCUMENT_IMAGE_LABEL)?.props.source).toBeUndefined();
   });
 });

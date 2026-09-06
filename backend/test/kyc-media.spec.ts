@@ -107,7 +107,7 @@ describe("KycService.readOwnedMedia", () => {
 
     expect(mocks.findUnique).toHaveBeenCalledWith({
       where: { id: MEDIA_ID },
-      include: { verification: { select: { userId: true } } },
+      include: { verification: { select: { userId: true, status: true, expiresAt: true } } },
     });
     expect(mocks.read).not.toHaveBeenCalled();
   });
@@ -115,7 +115,7 @@ describe("KycService.readOwnedMedia", () => {
   it("denies media owned by another user", async () => {
     const row = {
       ...imageRow(),
-      verification: { userId: "another-user" },
+      verification: { userId: "another-user", status: "APPROVED", expiresAt: new Date("2026-12-01T00:00:00.000Z") },
     };
     const mocks = createServiceWithImageRow(row);
 
@@ -129,7 +129,7 @@ describe("KycService.readOwnedMedia", () => {
   it("hides media whose stored key does not match the safe pattern", async () => {
     const row = {
       ...imageRow({ storageKey: "archive/not-a-jpeg.png" }),
-      verification: { userId: OWNER_USER_ID },
+      verification: { userId: OWNER_USER_ID, status: "APPROVED", expiresAt: new Date("2026-12-01T00:00:00.000Z") },
     };
     const mocks = createServiceWithImageRow(row);
 
@@ -143,7 +143,7 @@ describe("KycService.readOwnedMedia", () => {
   it("streams the owned image with its stored metadata", async () => {
     const row = {
       ...imageRow(),
-      verification: { userId: OWNER_USER_ID },
+      verification: { userId: OWNER_USER_ID, status: "APPROVED", expiresAt: new Date("2026-12-01T00:00:00.000Z") },
     };
     const mocks = createServiceWithImageRow(row);
 
@@ -156,5 +156,17 @@ describe("KycService.readOwnedMedia", () => {
     });
 
     expect(mocks.read).toHaveBeenCalledWith(STORAGE_KEY);
+  });
+
+  it("does not stream media after the terminal verification expires", async () => {
+    const mocks = createServiceWithImageRow({
+      ...imageRow(),
+      verification: { userId: OWNER_USER_ID, status: "APPROVED", expiresAt: new Date("2020-01-01T00:00:00.000Z") },
+    });
+
+    await expect(
+      mocks.service.readOwnedMedia({ id: OWNER_USER_ID, email: "owner@example.test" }, MEDIA_ID),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(mocks.read).not.toHaveBeenCalled();
   });
 });

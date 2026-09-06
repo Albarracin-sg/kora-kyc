@@ -5,6 +5,7 @@ export const CAPTURE_PHASE = {
 } as const;
 
 const MAX_CAPTURE_PIXELS = 12_000_000;
+const MIN_CAPTURE_SHORT_SIDE = 480;
 
 interface PictureSizeCandidate {
   pictureSize: string;
@@ -94,12 +95,29 @@ export function selectSafePictureSize(availableSizes: readonly string[]): string
 }
 
 export function getCapturedPhotoUri(photo: unknown): string | null {
-  if (typeof photo !== "object" || photo === null || !("uri" in photo)) {
+  if (
+    typeof photo !== "object" ||
+    photo === null ||
+    !("uri" in photo) ||
+    !("width" in photo) ||
+    !("height" in photo)
+  ) {
     return null;
   }
 
-  const uri = photo.uri;
+  const { uri, width, height } = photo;
   if (typeof uri !== "string") {
+    return null;
+  }
+
+  if (
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    width < MIN_CAPTURE_SHORT_SIDE ||
+    height < MIN_CAPTURE_SHORT_SIDE
+  ) {
     return null;
   }
 

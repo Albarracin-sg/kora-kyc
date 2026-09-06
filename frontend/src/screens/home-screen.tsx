@@ -62,6 +62,12 @@ export function HomeScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.HOME>
         disabled={isLoading}
         variant={BUTTON_VARIANT.GHOST}
       />
+      <PrimaryButton
+        label="Historial"
+        onPress={() => navigation.navigate(APP_ROUTE.KYC_HISTORY)}
+        variant={BUTTON_VARIANT.GHOST}
+        accessibilityHint="Abre el historial privado de verificaciones"
+      />
     </ScreenShell>
   );
 }

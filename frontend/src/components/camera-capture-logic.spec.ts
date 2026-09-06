@@ -50,8 +50,18 @@ describe("camera capture safeguards", () => {
     expect(getCapturedPhotoUri({ uri: 123 })).toBeNull();
   });
 
+  it("rejects capture results without usable dimensions", () => {
+    expect(getCapturedPhotoUri({ uri: "file://capture-placeholder.jpg" })).toBeNull();
+    expect(getCapturedPhotoUri({ uri: "file://capture-placeholder.jpg", width: 0, height: 480 })).toBeNull();
+  });
+
+  it("rejects visibly inadequate capture dimensions", () => {
+    expect(getCapturedPhotoUri({ uri: "file://capture-placeholder.jpg", width: 479, height: 640 })).toBeNull();
+    expect(getCapturedPhotoUri({ uri: "file://capture-placeholder.jpg", width: 640, height: 479 })).toBeNull();
+  });
+
   it("normalizes a valid capture URI without logging or copying image data", () => {
-    expect(getCapturedPhotoUri({ uri: "  file://capture-placeholder.jpg  " })).toBe(
+    expect(getCapturedPhotoUri({ uri: "  file://capture-placeholder.jpg  ", width: 640, height: 480 })).toBe(
       "file://capture-placeholder.jpg",
     );
   });

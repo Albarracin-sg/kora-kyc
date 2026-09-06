@@ -47,6 +47,14 @@ const KYC_JOB_STATUS = {
   COMPLETED: "COMPLETED",
   FAILED: "FAILED",
 } as const;
+const KYC_HISTORY_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const EXPIRED_HISTORY_CLEANUP_BATCH_SIZE = 25;
+const TERMINAL_KYC_STATUSES = [
+  KYC_STATUS.APPROVED,
+  KYC_STATUS.REJECTED,
+  KYC_STATUS.NEEDS_REVIEW,
+  KYC_STATUS.PROCESSING_FAILED,
+] as const;
 
 export const KYC_PROCESSING_FAILURE = {
   DOCUMENT_STORAGE_READ_FAILED: "DOCUMENT_STORAGE_READ_FAILED",
@@ -167,6 +175,27 @@ export class KycProcessingWorker {
       }
     } finally {
       this.isClaimLoopRunning = false;
+    }
+  }
+
+  @Interval(60_000)
+  async cleanupExpiredHistory(): Promise<void> {
+    const now = new Date();
+    const expired = await this.prismaService.kycVerification.findMany({
+      where: { status: { in: [...TERMINAL_KYC_STATUSES] }, expiresAt: { lte: now } },
+      take: EXPIRED_HISTORY_CLEANUP_BATCH_SIZE,
+      select: { id: true, images: { select: { storageKey: true } } },
+    } as never) as unknown as Array<{ id: string; images: Array<{ storageKey: string }> }>;
+
+    for (const verification of expired) {
+      try {
+        for (const image of verification.images) await this.fileStorage.remove(image.storageKey);
+        await this.prismaService.kycVerification.deleteMany({
+          where: { id: verification.id, status: { in: [...TERMINAL_KYC_STATUSES] }, expiresAt: { lte: now } },
+        } as never);
+      } catch {
+        // Keep the database row for the next idempotent cleanup retry.
+      }
     }
   }
 
@@ -364,7 +393,7 @@ export class KycProcessingWorker {
           reasonCode: isFaceCaptureFailureCode(error.code)
             ? `FACE_CAPTURE_${error.code}`
             : `FACE_CAPTURE_${FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE}`,
-          documentType: null,
+          documentType: extractedDocument.parsedDocument.documentType,
           documentNumberHash: null,
           ...this.documentProfileFields(extractedDocument),
           documentOcrConfidence: null,
@@ -787,6 +816,8 @@ export class KycProcessingWorker {
         ? KYC_JOB_STATUS.FAILED
         : KYC_JOB_STATUS.COMPLETED;
 
+    const finalizedAt = new Date();
+    const expiresAt = new Date(finalizedAt.getTime() + KYC_HISTORY_RETENTION_MS);
     try {
       await this.prismaService.$transaction(async (transaction) => {
         const jobCompletion = await transaction.kycProcessingJob.updateMany({
@@ -828,7 +859,9 @@ export class KycProcessingWorker {
             documentProviderModel: outcome.documentProviderModel,
             faceDistance: outcome.faceDistance,
             faceSimilarity: outcome.faceSimilarity,
-          },
+            finalizedAt,
+            expiresAt,
+          } as never,
         });
         if (verificationCompletion.count !== 1) {
           throw new KycJobClaimLostError();

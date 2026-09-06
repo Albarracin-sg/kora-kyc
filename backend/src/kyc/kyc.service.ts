@@ -42,6 +42,15 @@ const MEDIA_ID_PATTERN = /^c[a-z0-9]{24}$/;
 const SAFE_STORAGE_KEY_PATTERN = /^[a-zA-Z0-9/_-]+\.jpg$/;
 const COLOMBIAN_CEDULA_DOCUMENT_TYPE = "COLOMBIAN_CEDULA";
 const COLOMBIAN_NATIONALITY = "COLOMBIAN";
+const HISTORY_CURSOR_VERSION = 1;
+const HISTORY_DEFAULT_LIMIT = 20;
+const HISTORY_MAX_LIMIT = 50;
+const TERMINAL_KYC_STATUSES = [
+  KYC_STATUS.APPROVED,
+  KYC_STATUS.REJECTED,
+  KYC_STATUS.NEEDS_REVIEW,
+  KYC_STATUS.PROCESSING_FAILED,
+] as const;
 
 export interface KycImageMetadata {
   id: string;
@@ -61,7 +70,7 @@ export interface OwnedMedia {
 }
 
 interface KycImageWithOwner extends KycImage {
-  verification: { userId: string };
+  verification: { userId: string; status: string; expiresAt: Date | null };
 }
 
 export interface KycPublicVerification {
@@ -90,6 +99,55 @@ export interface KycPublicVerification {
 export interface KycConsentRequirements {
   requiresExternalProcessing: boolean;
   consentVersion: string | null;
+}
+
+export interface KycHistoryListInput {
+  cursor?: string;
+  limit?: number;
+}
+
+export interface KycHistoryItem {
+  id: string;
+  status: KycStatus;
+  finalizedAt: Date;
+  faceSimilarity: number | null;
+}
+
+export interface KycHistoryList {
+  items: KycHistoryItem[];
+  nextCursor: string | null;
+}
+
+export interface KycHistoryImage {
+  id: string;
+  kind: KycImageKind;
+  side: DocumentSide | null;
+}
+
+export interface KycHistoryDetail extends KycHistoryItem {
+  reasonCode: string | null;
+  documentFullName: string | null;
+  documentNumber: string | null;
+  documentBirthDate: Date | null;
+  documentIssueDate: Date | null;
+  documentSex: string | null;
+  documentHeight: string | null;
+  documentBloodType: string | null;
+  documentBirthPlace: string | null;
+  documentCheckResult: string | null;
+  documentNationality: string | null;
+  images: KycHistoryImage[];
+}
+
+interface KycHistoryCursor {
+  version: number;
+  finalizedAt: string;
+  id: string;
+}
+
+interface HistoryRetentionFields {
+  finalizedAt: Date | null;
+  expiresAt: Date | null;
 }
 
 interface KycVerificationWithImages extends KycVerification {
@@ -241,6 +299,87 @@ export class KycService {
     return verification ? this.toPublicVerification(verification) : null;
   }
 
+  async listHistory(user: AuthenticatedUser, input: KycHistoryListInput): Promise<KycHistoryList> {
+    const limit = this.parseHistoryLimit(input.limit);
+    const cursor = input.cursor ? this.parseHistoryCursor(input.cursor) : null;
+    const now = new Date();
+    const where = {
+      userId: user.id,
+      status: { in: [...TERMINAL_KYC_STATUSES] },
+      finalizedAt: { not: null },
+      expiresAt: { gt: now },
+      ...(cursor
+        ? {
+            OR: [
+              { finalizedAt: { lt: new Date(cursor.finalizedAt) } },
+              { finalizedAt: new Date(cursor.finalizedAt), id: { lt: cursor.id } },
+            ],
+          }
+        : {}),
+    };
+    const rows = await this.prismaService.kycVerification.findMany({
+      where,
+      orderBy: [{ finalizedAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      select: {
+        id: true,
+        status: true,
+        finalizedAt: true,
+        faceSimilarity: true,
+      },
+    } as never);
+    const page = rows.slice(0, limit) as unknown as Array<{
+      id: string;
+      status: KycStatus;
+      finalizedAt: Date | null;
+      faceSimilarity: number | null;
+    }>;
+    const items = page.map((row) => this.toHistoryItem(row));
+    const lastItem = items.at(-1);
+    return {
+      items,
+      nextCursor:
+        rows.length > limit && lastItem
+          ? this.createHistoryCursor(lastItem.finalizedAt, lastItem.id)
+          : null,
+    };
+  }
+
+  async getHistoryDetail(user: AuthenticatedUser, verificationId: string): Promise<KycHistoryDetail> {
+    const row = await this.prismaService.kycVerification.findFirst({
+      where: { id: verificationId },
+      select: {
+        id: true, userId: true, status: true, rejectionCode: true, documentType: true,
+        documentFullName: true, documentNumber: true, documentBirthDate: true,
+        documentIssueDate: true, documentSex: true, documentHeight: true,
+        documentBloodType: true, documentBirthPlace: true, documentCheckResult: true,
+        faceSimilarity: true, finalizedAt: true, expiresAt: true,
+        images: { select: { id: true, kind: true, side: true } },
+      },
+    } as never) as (Record<string, unknown> & HistoryRetentionFields) | null;
+    if (!row) throw new NotFoundException("KYC history entry not found");
+    if (row.userId !== user.id) throw new ForbiddenException("KYC history entry is not available to this user");
+    if (!this.isAvailableHistoryRow(row)) throw new NotFoundException("KYC history entry not found");
+
+    return {
+      ...this.toHistoryItem(row as never),
+      reasonCode: typeof row.rejectionCode === "string" ? row.rejectionCode : null,
+      documentFullName: this.stringOrNull(row.documentFullName),
+      documentNumber: this.stringOrNull(row.documentNumber),
+      documentBirthDate: this.dateOrNull(row.documentBirthDate),
+      documentIssueDate: this.dateOrNull(row.documentIssueDate),
+      documentSex: this.stringOrNull(row.documentSex),
+      documentHeight: this.stringOrNull(row.documentHeight),
+      documentBloodType: this.stringOrNull(row.documentBloodType),
+      documentBirthPlace: this.stringOrNull(row.documentBirthPlace),
+      documentCheckResult: this.stringOrNull(row.documentCheckResult),
+      documentNationality: row.documentType === COLOMBIAN_CEDULA_DOCUMENT_TYPE ? COLOMBIAN_NATIONALITY : null,
+      images: Array.isArray(row.images)
+        ? row.images.map((image) => this.toHistoryImage(image))
+        : [],
+    };
+  }
+
   getConsentRequirements(): KycConsentRequirements {
     return {
       requiresExternalProcessing: this.requiresExternalProcessing(),
@@ -255,8 +394,8 @@ export class KycService {
 
     const image = (await this.prismaService.kycImage.findUnique({
       where: { id: mediaId },
-      include: { verification: { select: { userId: true } } },
-    })) as KycImageWithOwner | null;
+      include: { verification: { select: { userId: true, status: true, expiresAt: true } } },
+    } as never)) as KycImageWithOwner | null;
 
     if (!image) {
       throw new NotFoundException("Media not found");
@@ -264,6 +403,13 @@ export class KycService {
 
     if (image.verification.userId !== user.id) {
       throw new ForbiddenException("Media is not available to this user");
+    }
+    if (
+      !this.isTerminalStatus(image.verification.status) ||
+      !image.verification.expiresAt ||
+      image.verification.expiresAt <= new Date()
+    ) {
+      throw new NotFoundException("Media not found");
     }
 
     if (!SAFE_STORAGE_KEY_PATTERN.test(image.storageKey)) {
@@ -490,6 +636,59 @@ export class KycService {
       return;
     }
   }
+
+  private parseHistoryLimit(value: number | undefined): number {
+    if (value === undefined) return HISTORY_DEFAULT_LIMIT;
+    if (!Number.isInteger(value) || value < 1 || value > HISTORY_MAX_LIMIT) {
+      throw new BadRequestException("History limit must be an integer between 1 and 50");
+    }
+    return value;
+  }
+
+  private parseHistoryCursor(value: string): KycHistoryCursor {
+    try {
+      const decoded = Buffer.from(value, "base64url").toString("utf8");
+      const cursor = JSON.parse(decoded) as unknown;
+      if (
+        typeof cursor !== "object" || cursor === null ||
+        !("version" in cursor) || !("finalizedAt" in cursor) || !("id" in cursor) ||
+        cursor.version !== HISTORY_CURSOR_VERSION || typeof cursor.finalizedAt !== "string" ||
+        typeof cursor.id !== "string" || !cursor.id || !Number.isFinite(new Date(cursor.finalizedAt).getTime())
+      ) throw new Error("Invalid cursor");
+      return cursor as KycHistoryCursor;
+    } catch {
+      throw new BadRequestException("Invalid history cursor");
+    }
+  }
+
+  private createHistoryCursor(finalizedAt: Date, id: string): string {
+    return Buffer.from(JSON.stringify({ version: HISTORY_CURSOR_VERSION, finalizedAt: finalizedAt.toISOString(), id })).toString("base64url");
+  }
+
+  private toHistoryItem(row: { id: string; status: KycStatus; finalizedAt: Date | null; faceSimilarity: number | null }): KycHistoryItem {
+    if (!row.finalizedAt) throw new NotFoundException("KYC history entry not found");
+    return { id: row.id, status: row.status, finalizedAt: row.finalizedAt, faceSimilarity: this.safeFaceSimilarity(row.faceSimilarity) };
+  }
+
+  private toHistoryImage(image: unknown): KycHistoryImage {
+    const value = image as { id: string; kind: KycImageKind; side: DocumentSide | null };
+    return { id: value.id, kind: value.kind, side: value.side ?? null };
+  }
+
+  private safeFaceSimilarity(value: unknown): number | null {
+    return typeof value === "number" && Number.isFinite(value) && value >= -1 && value <= 1 ? value : null;
+  }
+
+  private isAvailableHistoryRow(row: Record<string, unknown> & HistoryRetentionFields): boolean {
+    return this.isTerminalStatus(row.status) && row.finalizedAt instanceof Date && row.expiresAt instanceof Date && row.expiresAt > new Date();
+  }
+
+  private isTerminalStatus(status: unknown): status is (typeof TERMINAL_KYC_STATUSES)[number] {
+    return typeof status === "string" && (TERMINAL_KYC_STATUSES as readonly string[]).includes(status);
+  }
+
+  private stringOrNull(value: unknown): string | null { return typeof value === "string" ? value : null; }
+  private dateOrNull(value: unknown): Date | null { return value instanceof Date ? value : null; }
 
   private toPublicVerification(verification: KycVerificationWithImages): KycPublicVerification {
     return {

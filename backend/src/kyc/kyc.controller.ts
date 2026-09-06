@@ -25,6 +25,8 @@ import type { StartKycDto } from "./dto/start-kyc.dto";
 import {
   KycService,
   type KycConsentRequirements,
+  type KycHistoryDetail,
+  type KycHistoryList,
   type KycPublicVerification,
 } from "./kyc.service";
 
@@ -106,6 +108,19 @@ export class KycController {
   @ApiResponse({ status: 200, description: "Active KYC verification or null" })
   async current(@CurrentUser() user: AuthenticatedUser): Promise<KycPublicVerification | null> {
     return this.kycService.getCurrent(user);
+  }
+
+  @Get("history")
+  @ApiOperation({ summary: "List unexpired private KYC history for the authenticated user" })
+  async history(@CurrentUser() user: AuthenticatedUser, @Query("cursor") cursor?: string, @Query("limit") limit?: string): Promise<KycHistoryList> {
+    const parsedLimit = limit === undefined ? undefined : Number(limit);
+    return this.kycService.listHistory(user, { cursor, limit: parsedLimit });
+  }
+
+  @Get("history/:verificationId")
+  @ApiOperation({ summary: "Get one unexpired private KYC history entry for the authenticated user" })
+  async historyDetail(@CurrentUser() user: AuthenticatedUser, @Param("verificationId") verificationId: string): Promise<KycHistoryDetail> {
+    return this.kycService.getHistoryDetail(user, verificationId);
   }
 
   @Get("media/:mediaId")

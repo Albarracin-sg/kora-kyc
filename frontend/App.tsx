@@ -21,6 +21,8 @@ import { APP_ROUTE, type RootStackParamList } from "./src/navigation/routes";
 import { DocumentScanScreen } from "./src/screens/document-scan-screen";
 import { HomeScreen } from "./src/screens/home-screen";
 import { KycProcessingResultScreen } from "./src/screens/kyc-processing-result-screen";
+import { KycHistoryDetailScreen } from "./src/screens/kyc-history-detail-screen";
+import { KycHistoryScreen } from "./src/screens/kyc-history-screen";
 import { LoginScreen } from "./src/screens/login-screen";
 import { ProfileScreen } from "./src/screens/profile-screen";
 import { RegisterScreen } from "./src/screens/register-screen";
@@ -72,6 +74,8 @@ function ApplicationNavigator(): ReactNode {
               component={KycProcessingResultScreen}
             />
             <Stack.Screen name={APP_ROUTE.PROFILE} component={ProfileScreen} />
+            <Stack.Screen name={APP_ROUTE.KYC_HISTORY} component={KycHistoryScreen} />
+            <Stack.Screen name={APP_ROUTE.KYC_HISTORY_DETAIL} component={KycHistoryDetailScreen} />
           </>
         ) : (
           <>

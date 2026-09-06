@@ -78,6 +78,8 @@ function createVerification(): KycVerification {
     consentAcceptedAt: null,
     frontPresent: true,
     backPresent: true,
+    finalizedAt: null,
+    expiresAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -253,6 +255,41 @@ describe("KycProcessingWorker remote consent guard", () => {
     await worker["processJob"](createJob());
 
     expect(extract).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("KycProcessingWorker expired history cleanup", () => {
+  it("removes private objects before deleting the expired terminal row", async () => {
+    const remove = jest.fn().mockResolvedValue(undefined);
+    const deleteMany = jest.fn().mockResolvedValue({ count: 1 });
+    const worker = new KycProcessingWorker(
+      { kycVerification: { findMany: jest.fn().mockResolvedValue([{ id: "expired-id", images: [{ storageKey: "owner/expired/front/file.jpg" }] }]), deleteMany } } as unknown as PrismaService,
+      { values: {} } as AppConfigService,
+      { remove } as unknown as FileStorage,
+      { audit: { provider: "test", model: "test" }, extract: jest.fn() },
+      { verify: jest.fn() },
+    );
+
+    await worker.cleanupExpiredHistory();
+
+    expect(remove).toHaveBeenCalledWith("owner/expired/front/file.jpg");
+    expect(deleteMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: "expired-id" }) }));
+  });
+
+  it("keeps the database row for a later idempotent retry when object removal fails", async () => {
+    const remove = jest.fn().mockRejectedValue(new Error("temporary storage failure"));
+    const deleteMany = jest.fn();
+    const worker = new KycProcessingWorker(
+      { kycVerification: { findMany: jest.fn().mockResolvedValue([{ id: "expired-id", images: [{ storageKey: "owner/expired/front/file.jpg" }] }]), deleteMany } } as unknown as PrismaService,
+      { values: {} } as AppConfigService,
+      { remove } as unknown as FileStorage,
+      { audit: { provider: "test", model: "test" }, extract: jest.fn() },
+      { verify: jest.fn() },
+    );
+
+    await worker.cleanupExpiredHistory();
+
+    expect(deleteMany).not.toHaveBeenCalled();
   });
 });
 
@@ -564,8 +601,10 @@ describe("KycProcessingWorker document profile persistence", () => {
           documentHeight: "1,64 m",
           documentBloodType: "O+",
           documentBirthPlace: "Bogotá",
-          documentType: null,
+          documentType: "COLOMBIAN_CEDULA",
           documentNumberHash: null,
+          faceDistance: null,
+          faceSimilarity: null,
         }),
       }),
     );
@@ -598,8 +637,10 @@ describe("KycProcessingWorker document profile persistence", () => {
           documentHeight: "1,64 m",
           documentBloodType: "O+",
           documentBirthPlace: "Bogotá",
-          documentType: null,
+          documentType: "COLOMBIAN_CEDULA",
           documentNumberHash: null,
+          faceDistance: null,
+          faceSimilarity: null,
         }),
       }),
     );

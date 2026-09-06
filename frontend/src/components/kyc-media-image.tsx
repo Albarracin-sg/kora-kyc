@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useIsFocused } from "@react-navigation/native";
 import {
   ActivityIndicator,
   Image,
@@ -29,6 +30,7 @@ export function KycMediaImage({
   style,
   resizeMode = "cover",
 }: KycMediaImageProps): ReactNode {
+  const isFocused = useIsFocused();
   const [source, setSource] = useState<AuthenticatedMediaSource | null>(null);
   const [failed, setFailed] = useState(false);
   const retryAttemptsRef = useRef(0);
@@ -38,6 +40,10 @@ export function KycMediaImage({
     retryAttemptsRef.current = 0;
     setSource(null);
     setFailed(false);
+
+    if (!isFocused) {
+      return () => { isCurrent = false; };
+    }
 
     getAuthenticatedMediaSource(mediaId)
       .then((resolvedSource) => {
@@ -54,7 +60,7 @@ export function KycMediaImage({
     return () => {
       isCurrent = false;
     };
-  }, [mediaId]);
+  }, [isFocused, mediaId]);
 
   function handleImageError(): void {
     if (retryAttemptsRef.current >= MEDIA_SOURCE_RETRY_LIMIT) {

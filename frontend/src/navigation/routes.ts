@@ -10,11 +10,28 @@ export const APP_ROUTE = {
   SELFIE: "Selfie",
   KYC_PROCESSING_RESULT: "KycProcessingResult",
   PROFILE: "Profile",
+  KYC_HISTORY: "KycHistory",
+  KYC_HISTORY_DETAIL: "KycHistoryDetail",
 } as const;
 
 export type AppRoute = (typeof APP_ROUTE)[keyof typeof APP_ROUTE];
 
-export type RootStackParamList = Record<AppRoute, undefined>;
+export interface RootStackParamList {
+  [route: string]: object | undefined;
+  Welcome: undefined;
+  Register: undefined;
+  Login: undefined;
+  Home: undefined;
+  StartKyc: undefined;
+  DocumentScan: undefined;
+  Selfie: undefined;
+  KycProcessingResult: undefined;
+  Profile: undefined;
+  KycHistory: undefined;
+  KycHistoryDetail: { verificationId: string };
+}
+
+export type KycFlowRoute = Exclude<AppRoute, typeof APP_ROUTE.KYC_HISTORY_DETAIL>;
 
 export type AppScreenProps<Route extends AppRoute> = NativeStackScreenProps<
   RootStackParamList,

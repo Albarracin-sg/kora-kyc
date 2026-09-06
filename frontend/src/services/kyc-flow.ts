@@ -1,4 +1,4 @@
-import { APP_ROUTE, type AppRoute } from "../navigation/routes";
+import { APP_ROUTE, type KycFlowRoute } from "../navigation/routes";
 import {
   DOCUMENT_SIDE,
   KYC_IMAGE_KIND,
@@ -44,7 +44,7 @@ export function isTerminalKycStatus(status: KycVerification["status"]): boolean 
   );
 }
 
-export function getKycRoute(verification: KycVerification | null): AppRoute {
+export function getKycRoute(verification: KycVerification | null): KycFlowRoute {
   if (!verification) {
     return APP_ROUTE.START_KYC;
   }
