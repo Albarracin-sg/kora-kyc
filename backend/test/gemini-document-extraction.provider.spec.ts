@@ -145,11 +145,13 @@ describe("Gemini document extraction", () => {
     const createGeminiProvider = jest.fn(() => geminiProvider);
     const createHuggingFaceProvider = jest.fn(() => huggingFaceProvider);
 
+    const createOpenCodeGoProvider = jest.fn(() => localProvider);
     expect(
       selectDocumentExtractionProvider(
         { documentProvider: KYC_DOCUMENT_PROVIDER.GEMINI },
         createGeminiProvider,
         createHuggingFaceProvider,
+        createOpenCodeGoProvider,
         localProvider,
       ),
     ).toBe(geminiProvider);
@@ -158,6 +160,7 @@ describe("Gemini document extraction", () => {
         { documentProvider: KYC_DOCUMENT_PROVIDER.HUGGING_FACE },
         createGeminiProvider,
         createHuggingFaceProvider,
+        createOpenCodeGoProvider,
         localProvider,
       ),
     ).toBe(huggingFaceProvider);
@@ -166,11 +169,13 @@ describe("Gemini document extraction", () => {
         { documentProvider: KYC_DOCUMENT_PROVIDER.LOCAL },
         createGeminiProvider,
         createHuggingFaceProvider,
+        createOpenCodeGoProvider,
         localProvider,
       ),
     ).toBe(localProvider);
     expect(createGeminiProvider).toHaveBeenCalledTimes(1);
     expect(createHuggingFaceProvider).toHaveBeenCalledTimes(1);
+    expect(createOpenCodeGoProvider).not.toHaveBeenCalled();
   });
 
   it("fails configuration clearly when Gemini is selected without an API key", () => {
@@ -182,16 +187,17 @@ describe("Gemini document extraction", () => {
     );
   });
 
-  it("keeps Gemini as the default even when Hugging Face variables are present", () => {
+  it("keeps OpenCode Go as the default even when legacy variables are present", () => {
     const environment: NodeJS.ProcessEnv = {
       ...BASE_ENVIRONMENT,
+      OPENCODE_GO_API_KEY: "test-opencode-go-key",
       HUGGINGFACE_API_TOKEN: "test-huggingface-token",
       HUGGINGFACE_DOCUMENT_MODEL: "Organization/DocumentModel:provider",
     };
     delete environment.KYC_DOCUMENT_PROVIDER;
 
     expect(createAppConfiguration(environment, process.cwd()).documentProvider).toBe(
-      KYC_DOCUMENT_PROVIDER.GEMINI,
+      KYC_DOCUMENT_PROVIDER.OPENCODE_GO,
     );
   });
 

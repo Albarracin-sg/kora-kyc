@@ -11,6 +11,7 @@ import { FaceServiceVerificationProvider } from "./providers/face-service-verifi
 import { LocalTesseractDocumentExtractionProvider } from "./providers/local-tesseract-document-extraction.provider";
 import { GeminiDocumentExtractionProvider } from "./providers/gemini-document-extraction.provider";
 import { HuggingFaceDocumentExtractionProvider } from "./providers/hugging-face-document-extraction.provider";
+import { OpenCodeGoDocumentExtractionProvider } from "./providers/opencode-go-document-extraction.provider";
 import { selectDocumentExtractionProvider } from "./providers/document-extraction-provider.factory";
 import { selectFaceVerificationProvider } from "./providers/face-verification-provider.factory";
 import { AppConfigService } from "../config/app-config.service";
@@ -38,10 +39,11 @@ import { LocalFileStorage } from "./storage/local-file.storage";
         localProvider: LocalTesseractDocumentExtractionProvider,
       ) =>
         selectDocumentExtractionProvider(
-          configService.values,
-          () => new GeminiDocumentExtractionProvider(configService),
-          () => new HuggingFaceDocumentExtractionProvider(configService),
-          localProvider,
+           configService.values,
+           () => new GeminiDocumentExtractionProvider(configService),
+           () => new HuggingFaceDocumentExtractionProvider(configService),
+           () => new OpenCodeGoDocumentExtractionProvider(configService),
+           localProvider,
         ),
       inject: [AppConfigService, LocalTesseractDocumentExtractionProvider],
     },

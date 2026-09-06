@@ -8,9 +8,12 @@ export function selectDocumentExtractionProvider(
   configuration: Pick<AppConfiguration, "documentProvider">,
   createGeminiProvider: () => DocumentExtractionProvider,
   createHuggingFaceProvider: () => DocumentExtractionProvider,
+  createOpenCodeGoProvider: () => DocumentExtractionProvider,
   localProvider: DocumentExtractionProvider,
 ): DocumentExtractionProvider {
   switch (configuration.documentProvider) {
+    case KYC_DOCUMENT_PROVIDER.OPENCODE_GO:
+      return createOpenCodeGoProvider();
     case KYC_DOCUMENT_PROVIDER.GEMINI:
       return createGeminiProvider();
     case KYC_DOCUMENT_PROVIDER.HUGGING_FACE:

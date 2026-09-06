@@ -32,8 +32,14 @@ const CONFIG_DEFAULTS = {
   rateLimitKycLimit: 30,
   rateLimitKycTtlMs: 60_000,
   rateLimitKycBlockMs: 120_000,
+  openCodeGoDocumentTimeoutMs: 30_000,
   huggingFaceDocumentTimeoutMs: 30_000,
   faceServiceTimeoutMs: 30_000,
+} as const;
+
+const OPENCODE_GO_DOCUMENT_TIMEOUT = {
+  minimumMs: 1_000,
+  maximumMs: 120_000,
 } as const;
 
 const HUGGING_FACE_DOCUMENT_TIMEOUT = {
@@ -59,7 +65,14 @@ const HUGGING_FACE_NON_DETERMINISTIC_ROUTING_SUFFIXES = new Set<string>(
 const HUGGING_FACE_EXPLICIT_MODEL_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*:([a-z0-9][a-z0-9-]*)$/;
 
+const OPENCODE_GO_MODEL_PATTERN = /^opencode-go\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export const OPENCODE_GO_DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1";
+export const OPENCODE_GO_DEFAULT_DOCUMENT_MODEL =
+  "opencode-go/deepseek-v4-flash-vision-exp";
+
 export const KYC_DOCUMENT_PROVIDER = {
+  OPENCODE_GO: "opencode-go",
   GEMINI: "gemini",
   HUGGING_FACE: "huggingface",
   LOCAL: "local",
@@ -104,6 +117,10 @@ export interface AppConfiguration {
   faceServiceUrl: string;
   faceServiceTimeoutMs: number;
   faceApiKey: string;
+  openCodeGoApiKey: string | null;
+  openCodeGoBaseUrl: string;
+  openCodeGoDocumentModel: string;
+  openCodeGoDocumentTimeoutMs: number;
   geminiApiKey: string | null;
   geminiModel: string;
   huggingFaceApiToken: string | null;
@@ -256,8 +273,10 @@ function readEnvironment(environment: NodeJS.ProcessEnv): AppEnvironment {
 }
 
 function readDocumentProvider(environment: NodeJS.ProcessEnv): KycDocumentProvider {
-  const value = environment.KYC_DOCUMENT_PROVIDER?.trim() || KYC_DOCUMENT_PROVIDER.GEMINI;
+  const value =
+    environment.KYC_DOCUMENT_PROVIDER?.trim() || KYC_DOCUMENT_PROVIDER.OPENCODE_GO;
   if (
+    value === KYC_DOCUMENT_PROVIDER.OPENCODE_GO ||
     value === KYC_DOCUMENT_PROVIDER.GEMINI ||
     value === KYC_DOCUMENT_PROVIDER.HUGGING_FACE ||
     value === KYC_DOCUMENT_PROVIDER.LOCAL
@@ -265,7 +284,7 @@ function readDocumentProvider(environment: NodeJS.ProcessEnv): KycDocumentProvid
     return value;
   }
 
-  throw new Error("KYC_DOCUMENT_PROVIDER must be gemini, huggingface or local");
+  throw new Error("KYC_DOCUMENT_PROVIDER must be opencode-go, gemini, huggingface or local");
 }
 
 function readFaceVerificationProvider(
@@ -332,6 +351,63 @@ function readGeminiApiKey(
   }
 
   return apiKey;
+}
+
+function readOpenCodeGoApiKey(
+  environment: NodeJS.ProcessEnv,
+  documentProvider: KycDocumentProvider,
+): string | null {
+  const apiKey = environment.OPENCODE_GO_API_KEY?.trim() || null;
+  if (documentProvider === KYC_DOCUMENT_PROVIDER.OPENCODE_GO && !apiKey) {
+    throw new Error("OPENCODE_GO_API_KEY is required when KYC_DOCUMENT_PROVIDER=opencode-go");
+  }
+
+  return apiKey;
+}
+
+function readOpenCodeGoBaseUrl(
+  environment: NodeJS.ProcessEnv,
+  appEnvironment: AppEnvironment,
+  documentProvider: KycDocumentProvider,
+): string {
+  const rawValue = environment.OPENCODE_GO_BASE_URL?.trim() || OPENCODE_GO_DEFAULT_BASE_URL;
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(rawValue);
+  } catch {
+    throw new Error("OPENCODE_GO_BASE_URL must be an http(s) URL");
+  }
+
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    throw new Error("OPENCODE_GO_BASE_URL must be an http(s) URL");
+  }
+  if (
+    appEnvironment === APP_ENVIRONMENT.PRODUCTION &&
+    documentProvider === KYC_DOCUMENT_PROVIDER.OPENCODE_GO &&
+    parsedUrl.protocol !== "https:"
+  ) {
+    throw new Error("OPENCODE_GO_BASE_URL must use https in production");
+  }
+
+  return rawValue.replace(/\/+$/, "");
+}
+
+function readOpenCodeGoDocumentModel(
+  environment: NodeJS.ProcessEnv,
+  documentProvider: KycDocumentProvider,
+): string {
+  const model =
+    environment.OPENCODE_GO_DOCUMENT_MODEL?.trim() || OPENCODE_GO_DEFAULT_DOCUMENT_MODEL;
+  if (documentProvider !== KYC_DOCUMENT_PROVIDER.OPENCODE_GO) {
+    return model;
+  }
+  if (!OPENCODE_GO_MODEL_PATTERN.test(model)) {
+    throw new Error(
+      "OPENCODE_GO_DOCUMENT_MODEL must use the opencode-go/<model-id> format",
+    );
+  }
+
+  return model;
 }
 
 function readHuggingFaceApiToken(
@@ -466,6 +542,16 @@ export function createAppConfiguration(
       FACE_SERVICE_TIMEOUT.maximumMs,
     ),
     faceApiKey: readFaceApiKey(environment, faceVerificationProvider),
+    openCodeGoApiKey: readOpenCodeGoApiKey(environment, documentProvider),
+    openCodeGoBaseUrl: readOpenCodeGoBaseUrl(environment, appEnvironment, documentProvider),
+    openCodeGoDocumentModel: readOpenCodeGoDocumentModel(environment, documentProvider),
+    openCodeGoDocumentTimeoutMs: readBoundedPositiveInteger(
+      environment,
+      "OPENCODE_GO_DOCUMENT_TIMEOUT_MS",
+      CONFIG_DEFAULTS.openCodeGoDocumentTimeoutMs,
+      OPENCODE_GO_DOCUMENT_TIMEOUT.minimumMs,
+      OPENCODE_GO_DOCUMENT_TIMEOUT.maximumMs,
+    ),
     geminiApiKey: readGeminiApiKey(environment, documentProvider),
     geminiModel: environment.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
     huggingFaceApiToken: readHuggingFaceApiToken(environment, documentProvider),

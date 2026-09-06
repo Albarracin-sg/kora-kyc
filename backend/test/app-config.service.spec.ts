@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   FACE_VERIFICATION_PROVIDER,
+  KYC_DOCUMENT_PROVIDER,
   createAppConfiguration,
 } from "../src/config/app-config.service";
 
@@ -15,7 +16,8 @@ function baseEnvironment(): NodeJS.ProcessEnv {
     DATABASE_URL: "postgresql://test:test@localhost:5432/kyc_test",
     JWT_SECRET: "test-jwt-secret",
     KYC_DOCUMENT_HASH_PEPPER: "test-document-pepper",
-    GEMINI_API_KEY: "test-gemini-key",
+    KYC_DOCUMENT_PROVIDER: KYC_DOCUMENT_PROVIDER.OPENCODE_GO,
+    OPENCODE_GO_API_KEY: "test-opencode-go-key",
   };
 }
 
@@ -172,5 +174,64 @@ describe("createAppConfiguration face verification provider", () => {
     );
 
     expect(config.faceApiKey).toBe("test-face-api-key");
+  });
+});
+
+describe("createAppConfiguration OpenCode Go document provider", () => {
+  it("defaults OpenCode Go settings without exposing a secret", () => {
+    const config = createAppConfiguration(
+      {
+        DATABASE_URL: "postgresql://test:test@localhost:5432/kyc_test",
+        JWT_SECRET: "test-jwt-secret",
+        KYC_DOCUMENT_HASH_PEPPER: "test-document-pepper",
+        OPENCODE_GO_API_KEY: "test-opencode-go-key",
+      },
+      process.cwd(),
+    );
+
+    expect(config.documentProvider).toBe(KYC_DOCUMENT_PROVIDER.OPENCODE_GO);
+    expect(config.openCodeGoApiKey).toBe("test-opencode-go-key");
+    expect(config.openCodeGoBaseUrl).toBe("https://opencode.ai/zen/go/v1");
+    expect(config.openCodeGoDocumentModel).toBe(
+      "opencode-go/deepseek-v4-flash-vision-exp",
+    );
+    expect(config.openCodeGoDocumentTimeoutMs).toBe(30_000);
+  });
+
+  it("requires the OpenCode Go key only when OpenCode Go is selected", () => {
+    expect(() =>
+      createAppConfiguration(
+        {
+          DATABASE_URL: "postgresql://test:test@localhost:5432/kyc_test",
+          JWT_SECRET: "test-jwt-secret",
+          KYC_DOCUMENT_HASH_PEPPER: "test-document-pepper",
+          KYC_DOCUMENT_PROVIDER: KYC_DOCUMENT_PROVIDER.OPENCODE_GO,
+        },
+        process.cwd(),
+      ),
+    ).toThrow("OPENCODE_GO_API_KEY is required when KYC_DOCUMENT_PROVIDER=opencode-go");
+  });
+
+  it("rejects non-OpenCode Go model identifiers and insecure production URLs", () => {
+    const baseEnvironment: NodeJS.ProcessEnv = {
+      DATABASE_URL: "postgresql://test:test@localhost:5432/kyc_test",
+      JWT_SECRET: "test-jwt-secret",
+      KYC_DOCUMENT_HASH_PEPPER: "test-document-pepper",
+      KYC_DOCUMENT_PROVIDER: KYC_DOCUMENT_PROVIDER.OPENCODE_GO,
+      OPENCODE_GO_API_KEY: "test-opencode-go-key",
+    };
+
+    expect(() =>
+      createAppConfiguration(
+        { ...baseEnvironment, OPENCODE_GO_DOCUMENT_MODEL: "deepseek-v4-flash-vision-exp" },
+        process.cwd(),
+      ),
+    ).toThrow("OPENCODE_GO_DOCUMENT_MODEL must use the opencode-go/<model-id> format");
+    expect(() =>
+      createAppConfiguration(
+        { ...baseEnvironment, NODE_ENV: "production", OPENCODE_GO_BASE_URL: "http://provider" },
+        process.cwd(),
+      ),
+    ).toThrow("OPENCODE_GO_BASE_URL must use https in production");
   });
 });

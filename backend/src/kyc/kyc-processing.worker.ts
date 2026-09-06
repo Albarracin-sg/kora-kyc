@@ -27,6 +27,7 @@ import {
   GeminiDocumentExtractionError,
 } from "./providers/gemini-document-extraction.provider";
 import { HuggingFaceDocumentExtractionError } from "./providers/hugging-face-document-extraction.provider";
+import { OpenCodeGoDocumentExtractionError } from "./providers/opencode-go-document-extraction.provider";
 import {
   ExternalDocumentProviderError,
   EXTERNAL_DOCUMENT_PROVIDER_FAILURE,
@@ -463,7 +464,10 @@ export class KycProcessingWorker {
   }
 
   private documentProviderFailureLogDetails(error: unknown): ProviderFailureLogDetails {
-    if (error instanceof HuggingFaceDocumentExtractionError) {
+    if (
+      error instanceof HuggingFaceDocumentExtractionError ||
+      error instanceof OpenCodeGoDocumentExtractionError
+    ) {
       return {
         providerCode: error.code,
         ...(typeof error.httpStatus === "number"
@@ -757,6 +761,7 @@ export class KycProcessingWorker {
 
   private requiresExternalProcessing(): boolean {
     return (
+      this.configService.values.documentProvider === KYC_DOCUMENT_PROVIDER.OPENCODE_GO ||
       this.configService.values.documentProvider === KYC_DOCUMENT_PROVIDER.GEMINI ||
       this.configService.values.documentProvider === KYC_DOCUMENT_PROVIDER.HUGGING_FACE ||
       this.configService.values.faceVerificationProvider === FACE_VERIFICATION_PROVIDER.FACE_SERVICE
