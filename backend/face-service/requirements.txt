@@ -8,3 +8,4 @@ numpy==1.26.4
 # Loaded during service startup; the unit tests never import them.
 insightface==0.7.3
 onnxruntime>=1.17
+ml-dtypes>=0.5.0,<0.6
