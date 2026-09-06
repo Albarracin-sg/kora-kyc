@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 import { DigitalCedulaCard } from "../components/digital-cedula-card";
+import { AiVerificationSummary } from "../components/ai-verification-summary";
 import { BackToHomeButton } from "../components/back-to-home-button";
 import { KycStepIndicator } from "../components/kyc-step-indicator";
 import { PrimaryButton, BUTTON_VARIANT } from "../components/primary-button";
@@ -112,6 +113,14 @@ export function KycProcessingResultScreen(
             statusLabel={presentation.label}
             status={verification.status}
             reasonCode={verification.reasonCode}
+          />
+        ) : null}
+
+        {isTerminalKycStatus(verification.status) ? (
+          <AiVerificationSummary
+            verdict={verification.faceAiVerdict}
+            similarityPercent={verification.faceAiSimilarityPercent}
+            summary={verification.faceAiSummary}
           />
         ) : null}
 

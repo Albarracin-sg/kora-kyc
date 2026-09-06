@@ -89,6 +89,9 @@ export interface KycPublicVerification {
   documentCheckResult: string | null;
   documentNationality: string | null;
   faceSimilarity: number | null;
+  faceAiVerdict: string | null;
+  faceAiSimilarityPercent: number | null;
+  faceAiSummary: string | null;
   frontPresent: boolean;
   backPresent: boolean;
   createdAt: Date;
@@ -111,6 +114,9 @@ export interface KycHistoryItem {
   status: KycStatus;
   finalizedAt: Date;
   faceSimilarity: number | null;
+  faceAiVerdict: string | null;
+  faceAiSimilarityPercent: number | null;
+  faceAiSummary: string | null;
 }
 
 export interface KycHistoryList {
@@ -326,6 +332,9 @@ export class KycService {
         status: true,
         finalizedAt: true,
         faceSimilarity: true,
+        faceAiVerdict: true,
+        faceAiSimilarityPercent: true,
+        faceAiSummary: true,
       },
     } as never);
     const page = rows.slice(0, limit) as unknown as Array<{
@@ -333,6 +342,9 @@ export class KycService {
       status: KycStatus;
       finalizedAt: Date | null;
       faceSimilarity: number | null;
+      faceAiVerdict: string | null;
+      faceAiSimilarityPercent: number | null;
+      faceAiSummary: string | null;
     }>;
     const items = page.map((row) => this.toHistoryItem(row));
     const lastItem = items.at(-1);
@@ -352,8 +364,9 @@ export class KycService {
         id: true, userId: true, status: true, rejectionCode: true, documentType: true,
         documentFullName: true, documentNumber: true, documentBirthDate: true,
         documentIssueDate: true, documentSex: true, documentHeight: true,
-        documentBloodType: true, documentBirthPlace: true, documentCheckResult: true,
-        faceSimilarity: true, finalizedAt: true, expiresAt: true,
+         documentBloodType: true, documentBirthPlace: true, documentCheckResult: true,
+         faceSimilarity: true, faceAiVerdict: true, faceAiSimilarityPercent: true,
+         faceAiSummary: true, finalizedAt: true, expiresAt: true,
         images: { select: { id: true, kind: true, side: true } },
       },
     } as never) as (Record<string, unknown> & HistoryRetentionFields) | null;
@@ -374,6 +387,9 @@ export class KycService {
       documentBirthPlace: this.stringOrNull(row.documentBirthPlace),
       documentCheckResult: this.stringOrNull(row.documentCheckResult),
       documentNationality: row.documentType === COLOMBIAN_CEDULA_DOCUMENT_TYPE ? COLOMBIAN_NATIONALITY : null,
+      faceAiVerdict: this.stringOrNull(row.faceAiVerdict),
+      faceAiSimilarityPercent: this.safeFaceAiSimilarity(row.faceAiSimilarityPercent),
+      faceAiSummary: this.stringOrNull(row.faceAiSummary),
       images: Array.isArray(row.images)
         ? row.images.map((image) => this.toHistoryImage(image))
         : [],
@@ -665,9 +681,25 @@ export class KycService {
     return Buffer.from(JSON.stringify({ version: HISTORY_CURSOR_VERSION, finalizedAt: finalizedAt.toISOString(), id })).toString("base64url");
   }
 
-  private toHistoryItem(row: { id: string; status: KycStatus; finalizedAt: Date | null; faceSimilarity: number | null }): KycHistoryItem {
+  private toHistoryItem(row: {
+    id: string;
+    status: KycStatus;
+    finalizedAt: Date | null;
+    faceSimilarity: number | null;
+    faceAiVerdict: string | null;
+    faceAiSimilarityPercent: number | null;
+    faceAiSummary: string | null;
+  }): KycHistoryItem {
     if (!row.finalizedAt) throw new NotFoundException("KYC history entry not found");
-    return { id: row.id, status: row.status, finalizedAt: row.finalizedAt, faceSimilarity: this.safeFaceSimilarity(row.faceSimilarity) };
+    return {
+      id: row.id,
+      status: row.status,
+      finalizedAt: row.finalizedAt,
+      faceSimilarity: this.safeFaceSimilarity(row.faceSimilarity),
+      faceAiVerdict: this.stringOrNull(row.faceAiVerdict),
+      faceAiSimilarityPercent: this.safeFaceAiSimilarity(row.faceAiSimilarityPercent),
+      faceAiSummary: this.stringOrNull(row.faceAiSummary),
+    };
   }
 
   private toHistoryImage(image: unknown): KycHistoryImage {
@@ -677,6 +709,10 @@ export class KycService {
 
   private safeFaceSimilarity(value: unknown): number | null {
     return typeof value === "number" && Number.isFinite(value) && value >= -1 && value <= 1 ? value : null;
+  }
+
+  private safeFaceAiSimilarity(value: unknown): number | null {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
   }
 
   private isAvailableHistoryRow(row: Record<string, unknown> & HistoryRetentionFields): boolean {
@@ -710,6 +746,15 @@ export class KycService {
           ? COLOMBIAN_NATIONALITY
           : null,
       faceSimilarity: verification.faceSimilarity,
+      faceAiVerdict: typeof verification.faceAiVerdict === "string" ? verification.faceAiVerdict : null,
+      faceAiSimilarityPercent:
+        typeof verification.faceAiSimilarityPercent === "number" &&
+        Number.isFinite(verification.faceAiSimilarityPercent) &&
+        verification.faceAiSimilarityPercent >= 0 &&
+        verification.faceAiSimilarityPercent <= 100
+          ? verification.faceAiSimilarityPercent
+          : null,
+      faceAiSummary: typeof verification.faceAiSummary === "string" ? verification.faceAiSummary : null,
       frontPresent: verification.frontPresent,
       backPresent: verification.backPresent,
       createdAt: verification.createdAt,

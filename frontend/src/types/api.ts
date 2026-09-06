@@ -11,6 +11,8 @@ export const KYC_STATUS = {
 
 export type KycStatus = (typeof KYC_STATUS)[keyof typeof KYC_STATUS];
 
+export type FaceAiVerdict = "same_person" | "different_person" | "needs_review";
+
 export const KYC_PROCESSING_FAILURE = {
   DOCUMENT_PROVIDER_QUOTA_EXHAUSTED: "DOCUMENT_PROVIDER_QUOTA_EXHAUSTED",
 } as const;
@@ -115,6 +117,9 @@ export interface KycVerification {
   documentCheckResult: DocumentCheckResult | null;
   documentNationality: string | null;
   faceSimilarity: number | null;
+  faceAiVerdict?: FaceAiVerdict | null;
+  faceAiSimilarityPercent?: number | null;
+  faceAiSummary?: string | null;
   createdAt: string;
   updatedAt: string;
   images: KycImageMetadata[];
@@ -125,6 +130,9 @@ export interface KycHistoryItem {
   status: KycStatus;
   finalizedAt: string;
   faceSimilarity: number | null;
+  faceAiVerdict?: FaceAiVerdict | null;
+  faceAiSimilarityPercent?: number | null;
+  faceAiSummary?: string | null;
 }
 
 export interface KycHistoryList {

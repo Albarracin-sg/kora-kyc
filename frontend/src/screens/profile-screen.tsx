@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { CedulaDataCard } from "../components/cedula-data-card";
+import { AiVerificationSummary } from "../components/ai-verification-summary";
 import { AuthenticatedScreenShell } from "../components/authenticated-screen-shell";
 import { BackToHomeButton } from "../components/back-to-home-button";
 import { PrimaryButton, BUTTON_VARIANT } from "../components/primary-button";
@@ -95,6 +96,14 @@ export function ProfileScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.PR
             birthPlace={verification.documentBirthPlace}
             nationality={verification.documentNationality}
             checkResult={verification.documentCheckResult}
+          />
+        ) : null}
+
+        {verification ? (
+          <AiVerificationSummary
+            verdict={verification.faceAiVerdict}
+            similarityPercent={verification.faceAiSimilarityPercent}
+            summary={verification.faceAiSummary}
           />
         ) : null}
 

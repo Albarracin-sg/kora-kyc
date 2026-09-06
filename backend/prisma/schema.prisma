@@ -81,6 +81,11 @@ model KycVerification {
   documentProviderModel String?
   faceDistance          Float?
   faceSimilarity        Float?
+  faceAiVerdict         String?
+  faceAiSimilarityPercent Float?
+  faceAiSummary         String?
+  faceAiProvider        String?
+  faceAiProviderModel   String?
   consentVersion        String?
   consentAcceptedAt     DateTime?
   frontPresent          Boolean            @default(false)

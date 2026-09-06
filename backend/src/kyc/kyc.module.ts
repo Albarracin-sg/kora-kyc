@@ -12,6 +12,7 @@ import { LocalTesseractDocumentExtractionProvider } from "./providers/local-tess
 import { GeminiDocumentExtractionProvider } from "./providers/gemini-document-extraction.provider";
 import { HuggingFaceDocumentExtractionProvider } from "./providers/hugging-face-document-extraction.provider";
 import { OpenCodeGoDocumentExtractionProvider } from "./providers/opencode-go-document-extraction.provider";
+import { OpenCodeGoFaceAiVerificationProvider } from "./providers/face-ai-verification.provider";
 import { selectDocumentExtractionProvider } from "./providers/document-extraction-provider.factory";
 import { selectFaceVerificationProvider } from "./providers/face-verification-provider.factory";
 import { AppConfigService } from "../config/app-config.service";
@@ -66,6 +67,14 @@ import { LocalFileStorage } from "./storage/local-file.storage";
           localProvider,
         ),
       inject: [AppConfigService, LocalHumanFaceVerificationProvider],
+    },
+    {
+      provide: KYC_TOKENS.FACE_AI_VERIFICATION_PROVIDER,
+      useFactory: (configService: AppConfigService) =>
+        configService.values.documentProvider === "opencode-go"
+          ? new OpenCodeGoFaceAiVerificationProvider(configService)
+          : null,
+      inject: [AppConfigService],
     },
   ],
 })

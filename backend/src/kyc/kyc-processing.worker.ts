@@ -33,6 +33,10 @@ import {
   EXTERNAL_DOCUMENT_PROVIDER_FAILURE,
 } from "./providers/external-document-provider.error";
 import { isDocumentExtractionReasonCode } from "./providers/document-extraction-response";
+import type {
+  FaceAiVerificationProvider,
+  FaceAiVerificationResult,
+} from "./providers/face-ai-verification.provider";
 import {
   FACE_CAPTURE_FAILURE_CODE,
   FaceCaptureError,
@@ -103,6 +107,11 @@ interface KycTerminalOutcome {
   documentProviderModel: string | null;
   faceDistance: number | null;
   faceSimilarity: number | null;
+  faceAiVerdict?: string | null;
+  faceAiSimilarityPercent?: number | null;
+  faceAiSummary?: string | null;
+  faceAiProvider?: string | null;
+  faceAiProviderModel?: string | null;
 }
 
 class KycJobClaimLostError extends Error {
@@ -160,6 +169,8 @@ export class KycProcessingWorker {
     private readonly documentExtractionProvider: DocumentExtractionProvider,
     @Inject(KYC_TOKENS.FACE_VERIFICATION_PROVIDER)
     private readonly faceVerificationProvider: FaceVerificationProvider,
+    @Inject(KYC_TOKENS.FACE_AI_VERIFICATION_PROVIDER)
+    private readonly faceAiVerificationProvider: FaceAiVerificationProvider | null = null,
   ) {}
 
   @Interval(2_000)
@@ -383,13 +394,28 @@ export class KycProcessingWorker {
       return;
     }
 
+    let faceAiResult: FaceAiVerificationResult | null = null;
+    if (this.faceAiVerificationProvider) {
+      try {
+        faceAiResult = await this.faceAiVerificationProvider.verify(faceImageBuffer, selfieBuffer);
+      } catch {
+        this.logger.warn(
+          JSON.stringify({
+            event: "face_ai_verification_unavailable",
+            jobId: job.id,
+            verificationId: verification.id,
+          }),
+        );
+      }
+    }
+
     try {
       const faceResult = await this.faceVerificationProvider.verify(faceImageBuffer, selfieBuffer);
       const faceOutcome = this.evaluateFace(faceResult, extractedDocument);
-      await this.complete(job, verification, faceOutcome);
+      await this.complete(job, verification, this.withFaceAiResult(faceOutcome, faceAiResult));
     } catch (error: unknown) {
       if (error instanceof FaceCaptureError) {
-        await this.complete(job, verification, {
+        await this.complete(job, verification, this.withFaceAiResult({
           status: KYC_STATUS.NEEDS_REVIEW,
           reasonCode: isFaceCaptureFailureCode(error.code)
             ? `FACE_CAPTURE_${error.code}`
@@ -402,7 +428,7 @@ export class KycProcessingWorker {
           documentProviderModel: this.documentExtractionProvider.audit.model,
           faceDistance: null,
           faceSimilarity: null,
-        });
+        }, faceAiResult));
         return;
       }
 
@@ -412,6 +438,8 @@ export class KycProcessingWorker {
           verification,
           "face-runtime",
           KYC_PROCESSING_FAILURE.FACE_MODEL_UNAVAILABLE,
+          {},
+          faceAiResult,
         );
         return;
       }
@@ -421,6 +449,8 @@ export class KycProcessingWorker {
         verification,
         "face-runtime",
         KYC_PROCESSING_FAILURE.FACE_RUNTIME_FAILED,
+        {},
+        faceAiResult,
       );
     }
   }
@@ -431,6 +461,7 @@ export class KycProcessingWorker {
     stage: string,
     code: KycProcessingFailureCode,
     providerFailureLogDetails: ProviderFailureLogDetails = {},
+    faceAiResult: FaceAiVerificationResult | null = null,
   ): Promise<void> {
     this.logger.warn(
       JSON.stringify({
@@ -442,7 +473,26 @@ export class KycProcessingWorker {
         ...providerFailureLogDetails,
       }),
     );
-    await this.complete(job, verification, this.processingFailedOutcome(code));
+    await this.complete(
+      job,
+      verification,
+      this.withFaceAiResult(this.processingFailedOutcome(code), faceAiResult),
+    );
+  }
+
+  private withFaceAiResult(
+    outcome: KycTerminalOutcome,
+    result: FaceAiVerificationResult | null,
+  ): KycTerminalOutcome {
+    if (!result) return outcome;
+    return {
+      ...outcome,
+      faceAiVerdict: result.verdict,
+      faceAiSimilarityPercent: result.similarityPercent,
+      faceAiSummary: result.summary,
+      faceAiProvider: result.provider,
+      faceAiProviderModel: result.model,
+    };
   }
 
   private documentProviderFailureCode(error: unknown): KycProcessingFailureCode {
@@ -864,6 +914,11 @@ export class KycProcessingWorker {
             documentProviderModel: outcome.documentProviderModel,
             faceDistance: outcome.faceDistance,
             faceSimilarity: outcome.faceSimilarity,
+            faceAiVerdict: outcome.faceAiVerdict ?? null,
+            faceAiSimilarityPercent: outcome.faceAiSimilarityPercent ?? null,
+            faceAiSummary: outcome.faceAiSummary ?? null,
+            faceAiProvider: outcome.faceAiProvider ?? null,
+            faceAiProviderModel: outcome.faceAiProviderModel ?? null,
             finalizedAt,
             expiresAt,
           } as never,

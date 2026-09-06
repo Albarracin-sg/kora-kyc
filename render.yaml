@@ -8,7 +8,7 @@
 #      (JWT_SECRET, KYC_DOCUMENT_HASH_PEPPER, OPENCODE_GO_API_KEY,
 #      B2_KEY_ID y B2_APPLICATION_KEY) y
 #      redeployar. FACE_API_KEY debe coincidir con el
-#      FACE_SERVICE_API_KEY configurado en Railway; nunca se
+#      FACE_API_KEY configurado en Railway; nunca se
 #      expone al frontend.
 #
 # Limitaciones conocidas del plan free:
