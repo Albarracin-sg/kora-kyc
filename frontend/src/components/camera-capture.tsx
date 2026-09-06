@@ -408,8 +408,10 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   cameraContainer: {
-    flex: 1,
-    minHeight: 300,
+    alignSelf: "center",
+    aspectRatio: 4 / 3,
+    maxHeight: 520,
+    width: "100%",
     overflow: "hidden",
     borderRadius: RADIUS.lg,
     backgroundColor: COLORS.deep,
@@ -439,9 +441,10 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   selfieFrame: {
-    width: "64%",
-    aspectRatio: 0.74,
+    width: "56%",
+    aspectRatio: 0.78,
     borderRadius: RADIUS.pill,
+    top: "4%",
   },
   cameraStatus: {
     backgroundColor: COLORS.panel,

@@ -104,6 +104,9 @@ export function ProfileScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.PR
             verdict={verification.faceAiVerdict}
             similarityPercent={verification.faceAiSimilarityPercent}
             summary={verification.faceAiSummary}
+            biometricSimilarity={verification.faceSimilarity}
+            combinedSimilarityPercent={verification.faceCombinedSimilarityPercent}
+            combinedVerdict={verification.faceCombinedVerdict}
           />
         ) : null}
 

@@ -86,6 +86,8 @@ model KycVerification {
   faceAiSummary         String?
   faceAiProvider        String?
   faceAiProviderModel   String?
+  faceCombinedSimilarityPercent Float?
+  faceCombinedVerdict   String?
   consentVersion        String?
   consentAcceptedAt     DateTime?
   frontPresent          Boolean            @default(false)

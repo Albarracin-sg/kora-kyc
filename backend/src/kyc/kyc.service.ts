@@ -92,6 +92,8 @@ export interface KycPublicVerification {
   faceAiVerdict: string | null;
   faceAiSimilarityPercent: number | null;
   faceAiSummary: string | null;
+  faceCombinedSimilarityPercent: number | null;
+  faceCombinedVerdict: string | null;
   frontPresent: boolean;
   backPresent: boolean;
   createdAt: Date;
@@ -117,6 +119,8 @@ export interface KycHistoryItem {
   faceAiVerdict: string | null;
   faceAiSimilarityPercent: number | null;
   faceAiSummary: string | null;
+  faceCombinedSimilarityPercent: number | null;
+  faceCombinedVerdict: string | null;
 }
 
 export interface KycHistoryList {
@@ -335,6 +339,8 @@ export class KycService {
         faceAiVerdict: true,
         faceAiSimilarityPercent: true,
         faceAiSummary: true,
+        faceCombinedSimilarityPercent: true,
+        faceCombinedVerdict: true,
       },
     } as never);
     const page = rows.slice(0, limit) as unknown as Array<{
@@ -345,6 +351,8 @@ export class KycService {
       faceAiVerdict: string | null;
       faceAiSimilarityPercent: number | null;
       faceAiSummary: string | null;
+      faceCombinedSimilarityPercent: number | null;
+      faceCombinedVerdict: string | null;
     }>;
     const items = page.map((row) => this.toHistoryItem(row));
     const lastItem = items.at(-1);
@@ -366,7 +374,8 @@ export class KycService {
         documentIssueDate: true, documentSex: true, documentHeight: true,
          documentBloodType: true, documentBirthPlace: true, documentCheckResult: true,
          faceSimilarity: true, faceAiVerdict: true, faceAiSimilarityPercent: true,
-         faceAiSummary: true, finalizedAt: true, expiresAt: true,
+         faceAiSummary: true, faceCombinedSimilarityPercent: true, faceCombinedVerdict: true,
+         finalizedAt: true, expiresAt: true,
         images: { select: { id: true, kind: true, side: true } },
       },
     } as never) as (Record<string, unknown> & HistoryRetentionFields) | null;
@@ -390,6 +399,8 @@ export class KycService {
       faceAiVerdict: this.stringOrNull(row.faceAiVerdict),
       faceAiSimilarityPercent: this.safeFaceAiSimilarity(row.faceAiSimilarityPercent),
       faceAiSummary: this.stringOrNull(row.faceAiSummary),
+      faceCombinedSimilarityPercent: this.safeFaceAiSimilarity(row.faceCombinedSimilarityPercent),
+      faceCombinedVerdict: this.stringOrNull(row.faceCombinedVerdict),
       images: Array.isArray(row.images)
         ? row.images.map((image) => this.toHistoryImage(image))
         : [],
@@ -689,6 +700,8 @@ export class KycService {
     faceAiVerdict: string | null;
     faceAiSimilarityPercent: number | null;
     faceAiSummary: string | null;
+    faceCombinedSimilarityPercent: number | null;
+    faceCombinedVerdict: string | null;
   }): KycHistoryItem {
     if (!row.finalizedAt) throw new NotFoundException("KYC history entry not found");
     return {
@@ -699,6 +712,8 @@ export class KycService {
       faceAiVerdict: this.stringOrNull(row.faceAiVerdict),
       faceAiSimilarityPercent: this.safeFaceAiSimilarity(row.faceAiSimilarityPercent),
       faceAiSummary: this.stringOrNull(row.faceAiSummary),
+      faceCombinedSimilarityPercent: this.safeFaceAiSimilarity(row.faceCombinedSimilarityPercent),
+      faceCombinedVerdict: this.stringOrNull(row.faceCombinedVerdict),
     };
   }
 
@@ -755,6 +770,15 @@ export class KycService {
           ? verification.faceAiSimilarityPercent
           : null,
       faceAiSummary: typeof verification.faceAiSummary === "string" ? verification.faceAiSummary : null,
+      faceCombinedSimilarityPercent:
+        typeof verification.faceCombinedSimilarityPercent === "number" &&
+        Number.isFinite(verification.faceCombinedSimilarityPercent) &&
+        verification.faceCombinedSimilarityPercent >= 0 &&
+        verification.faceCombinedSimilarityPercent <= 100
+          ? verification.faceCombinedSimilarityPercent
+          : null,
+      faceCombinedVerdict:
+        typeof verification.faceCombinedVerdict === "string" ? verification.faceCombinedVerdict : null,
       frontPresent: verification.frontPresent,
       backPresent: verification.backPresent,
       createdAt: verification.createdAt,

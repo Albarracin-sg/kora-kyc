@@ -101,6 +101,8 @@ describe("KycService private history", () => {
           faceAiVerdict: null,
           faceAiSimilarityPercent: null,
           faceAiSummary: null,
+          faceCombinedSimilarityPercent: null,
+          faceCombinedVerdict: null,
         },
       ],
       nextCursor: expect.any(String),
@@ -155,6 +157,8 @@ describe("KycService private history", () => {
         faceAiVerdict: null,
         faceAiSimilarityPercent: null,
         faceAiSummary: null,
+        faceCombinedSimilarityPercent: null,
+        faceCombinedVerdict: null,
         images: [{ id: "media-one", kind: "DOCUMENT", side: "FRONT" }],
       });
       const detailQuery = (service as unknown as { prismaService: { kycVerification: { findFirst: jest.Mock } } }).prismaService.kycVerification.findFirst.mock.calls[0]?.[0];

@@ -82,6 +82,29 @@ const QUOTA_EXHAUSTED_PRESENTATION: KycStatusPresentation = {
   tone: KYC_STATUS_TONE.DANGER,
 };
 
+const NON_CEDULA_PRESENTATIONS: Record<string, KycStatusPresentation> = {
+  DOCUMENT_TYPE_NOT_RECOGNIZED: {
+    label: "Lo que subiste no es una cédula",
+    description: "La imagen no corresponde claramente a una cédula colombiana. Sube el frente de tu cédula para continuar.",
+    tone: KYC_STATUS_TONE.DANGER,
+  },
+  DOCUMENT_UNSUPPORTED: {
+    label: "Lo que subiste no es una cédula",
+    description: "El documento enviado no es compatible con la verificación de cédula colombiana.",
+    tone: KYC_STATUS_TONE.DANGER,
+  },
+  UNSUPPORTED_DOCUMENT_TYPE: {
+    label: "Lo que subiste no es una cédula",
+    description: "El documento enviado no parece ser una cédula colombiana.",
+    tone: KYC_STATUS_TONE.DANGER,
+  },
+  AMBIGUOUS_DOCUMENT_TYPE: {
+    label: "No pudimos identificar la cédula",
+    description: "La imagen no permite confirmar que sea una cédula colombiana. Sube una foto frontal más clara.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+};
+
 const FACE_CAPTURE_QUALITY_PRESENTATIONS: Record<
   KycFaceCaptureFailure,
   KycStatusPresentation
@@ -187,6 +210,10 @@ export function getKycStatusPresentation(
     reasonCode === KYC_PROCESSING_FAILURE.DOCUMENT_PROVIDER_QUOTA_EXHAUSTED
   ) {
     return QUOTA_EXHAUSTED_PRESENTATION;
+  }
+
+  if (reasonCode && NON_CEDULA_PRESENTATIONS[reasonCode]) {
+    return NON_CEDULA_PRESENTATIONS[reasonCode];
   }
 
   return STATUS_PRESENTATIONS[status];

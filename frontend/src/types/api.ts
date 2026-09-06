@@ -120,6 +120,8 @@ export interface KycVerification {
   faceAiVerdict?: FaceAiVerdict | null;
   faceAiSimilarityPercent?: number | null;
   faceAiSummary?: string | null;
+  faceCombinedSimilarityPercent?: number | null;
+  faceCombinedVerdict?: "same_person" | "different_person" | "needs_review" | null;
   createdAt: string;
   updatedAt: string;
   images: KycImageMetadata[];
@@ -133,6 +135,8 @@ export interface KycHistoryItem {
   faceAiVerdict?: FaceAiVerdict | null;
   faceAiSimilarityPercent?: number | null;
   faceAiSummary?: string | null;
+  faceCombinedSimilarityPercent?: number | null;
+  faceCombinedVerdict?: "same_person" | "different_person" | "needs_review" | null;
 }
 
 export interface KycHistoryList {

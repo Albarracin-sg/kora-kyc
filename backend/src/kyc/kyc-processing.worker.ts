@@ -112,6 +112,8 @@ interface KycTerminalOutcome {
   faceAiSummary?: string | null;
   faceAiProvider?: string | null;
   faceAiProviderModel?: string | null;
+  faceCombinedSimilarityPercent?: number | null;
+  faceCombinedVerdict?: string | null;
 }
 
 class KycJobClaimLostError extends Error {
@@ -411,7 +413,7 @@ export class KycProcessingWorker {
 
     try {
       const faceResult = await this.faceVerificationProvider.verify(faceImageBuffer, selfieBuffer);
-      const faceOutcome = this.evaluateFace(faceResult, extractedDocument);
+      const faceOutcome = this.evaluateFace(faceResult, extractedDocument, faceAiResult);
       await this.complete(job, verification, this.withFaceAiResult(faceOutcome, faceAiResult));
     } catch (error: unknown) {
       if (error instanceof FaceCaptureError) {
@@ -716,6 +718,7 @@ export class KycProcessingWorker {
   private evaluateFace(
     faceResult: FaceVerificationResult,
     extraction: DocumentExtractionResult,
+    faceAiResult: FaceAiVerificationResult | null,
   ): KycTerminalOutcome {
     if (!this.isValidFaceResult(faceResult)) {
       throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
@@ -731,9 +734,41 @@ export class KycProcessingWorker {
       .update(`${this.configService.values.documentHashPepper}:${documentNumber}`)
       .digest("hex");
 
+    const biometricPercent = Math.max(0, Math.min(100, faceResult.similarity * 100));
+    const aiPercent = faceAiResult?.similarityPercent ?? null;
+    const combinedPercent = aiPercent === null ? null : (biometricPercent + aiPercent) / 2;
+    const hasConfiguredAiProvider = this.faceAiVerificationProvider !== null;
+    const hasCompleteComparison = combinedPercent !== null && Number.isFinite(combinedPercent);
+    const combinedVerdict = hasCompleteComparison
+      ? combinedPercent > 50
+        ? "same_person"
+        : "different_person"
+      : "needs_review";
+
+    if (hasConfiguredAiProvider && !hasCompleteComparison) {
+      return {
+        status: KYC_STATUS.NEEDS_REVIEW,
+        reasonCode: "FACE_AI_COMPARISON_UNAVAILABLE",
+        documentType: parsedDocument.documentType,
+        documentNumberHash,
+        ...this.documentProfileFields(extraction),
+        documentOcrConfidence: extraction.confidence,
+        documentProvider: extraction.audit.provider,
+        documentProviderModel: extraction.audit.model,
+        faceDistance: faceResult.distance,
+        faceSimilarity: faceResult.similarity,
+        faceCombinedSimilarityPercent: null,
+        faceCombinedVerdict: combinedVerdict,
+      };
+    }
+
     return {
-      status: faceResult.accepted ? KYC_STATUS.APPROVED : KYC_STATUS.REJECTED,
-      reasonCode: faceResult.accepted ? "KYC_APPROVED" : "FACE_SIMILARITY_BELOW_THRESHOLD",
+      status: hasCompleteComparison
+        ? combinedPercent > 50 ? KYC_STATUS.APPROVED : KYC_STATUS.REJECTED
+        : faceResult.accepted ? KYC_STATUS.APPROVED : KYC_STATUS.REJECTED,
+      reasonCode: hasCompleteComparison
+        ? combinedPercent > 50 ? "KYC_APPROVED" : "FACE_SIMILARITY_BELOW_THRESHOLD"
+        : faceResult.accepted ? "KYC_APPROVED" : "FACE_SIMILARITY_BELOW_THRESHOLD",
       documentType: parsedDocument.documentType,
       documentNumberHash,
       ...this.documentProfileFields(extraction),
@@ -742,6 +777,8 @@ export class KycProcessingWorker {
       documentProviderModel: extraction.audit.model,
       faceDistance: faceResult.distance,
       faceSimilarity: faceResult.similarity,
+      faceCombinedSimilarityPercent: combinedPercent,
+      faceCombinedVerdict: combinedVerdict,
     };
   }
 
@@ -919,6 +956,8 @@ export class KycProcessingWorker {
             faceAiSummary: outcome.faceAiSummary ?? null,
             faceAiProvider: outcome.faceAiProvider ?? null,
             faceAiProviderModel: outcome.faceAiProviderModel ?? null,
+            faceCombinedSimilarityPercent: outcome.faceCombinedSimilarityPercent ?? null,
+            faceCombinedVerdict: outcome.faceCombinedVerdict ?? null,
             finalizedAt,
             expiresAt,
           } as never,

@@ -121,6 +121,9 @@ export function KycProcessingResultScreen(
             verdict={verification.faceAiVerdict}
             similarityPercent={verification.faceAiSimilarityPercent}
             summary={verification.faceAiSummary}
+            biometricSimilarity={verification.faceSimilarity}
+            combinedSimilarityPercent={verification.faceCombinedSimilarityPercent}
+            combinedVerdict={verification.faceCombinedVerdict}
           />
         ) : null}
 

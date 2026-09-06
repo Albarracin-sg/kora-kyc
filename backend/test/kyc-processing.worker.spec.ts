@@ -79,6 +79,8 @@ function createVerification(): KycVerification {
     faceAiSummary: null,
     faceAiProvider: null,
     faceAiProviderModel: null,
+    faceCombinedSimilarityPercent: null,
+    faceCombinedVerdict: null,
     consentVersion: null,
     consentAcceptedAt: null,
     frontPresent: true,
