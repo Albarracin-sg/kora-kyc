@@ -1,8 +1,11 @@
 import {
+  KYC_FACE_CAPTURE_FAILURE,
+  KYC_FACE_COMPARISON_REASON,
   KYC_PROCESSING_FAILURE,
   KYC_STATUS,
   DOCUMENT_CHECK_RESULT,
   type DocumentCheckResult,
+  type KycFaceCaptureFailure,
   type KycStatus,
 } from "../types/api";
 
@@ -20,6 +23,11 @@ export type KycStatusTone = (typeof KYC_STATUS_TONE)[keyof typeof KYC_STATUS_TON
 
 export interface KycStatusPresentation {
   label: string;
+  description: string;
+  tone: KycStatusTone;
+}
+
+export interface KycFaceMatchPresentation {
   description: string;
   tone: KycStatusTone;
 }
@@ -74,6 +82,75 @@ const QUOTA_EXHAUSTED_PRESENTATION: KycStatusPresentation = {
   tone: KYC_STATUS_TONE.DANGER,
 };
 
+const FACE_CAPTURE_QUALITY_PRESENTATIONS: Record<
+  KycFaceCaptureFailure,
+  KycStatusPresentation
+> = {
+  [KYC_FACE_CAPTURE_FAILURE.QUALITY_DOCUMENT_NO_FACE]: {
+    label: "Necesitamos una nueva foto",
+    description:
+      "No detectamos un rostro en la foto del documento. Tome una nueva foto del documento con el rostro visible y buena iluminación.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  [KYC_FACE_CAPTURE_FAILURE.QUALITY_DOCUMENT_FACE_RESOLUTION_TOO_SMALL]: {
+    label: "Necesitamos una nueva foto",
+    description:
+      "El rostro de la foto del documento es demasiado pequeño. Tome una nueva foto en la que se vea con mayor claridad.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  [KYC_FACE_CAPTURE_FAILURE.QUALITY_DOCUMENT_BLURRY]: {
+    label: "Necesitamos una nueva foto",
+    description:
+      "La imagen del documento está borrosa. Tome una nueva foto sin movimiento y con buena iluminación.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  [KYC_FACE_CAPTURE_FAILURE.QUALITY_DOCUMENT_ERROR]: {
+    label: "Necesitamos una nueva foto",
+    description:
+      "No pudimos procesar la foto del documento. Tome una nueva foto clara para continuar.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  [KYC_FACE_CAPTURE_FAILURE.QUALITY_SELFIE_NO_FACE]: {
+    label: "Necesitamos una nueva foto",
+    description:
+      "No detectamos un rostro en la selfie. Tome una nueva foto de su rostro con buena iluminación y una sola persona.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  [KYC_FACE_CAPTURE_FAILURE.QUALITY_SELFIE_FACE_RESOLUTION_TOO_SMALL]: {
+    label: "Necesitamos una nueva foto",
+    description:
+      "El rostro de la selfie es demasiado pequeño. Tome una nueva foto acercándose un poco más a la cámara.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  [KYC_FACE_CAPTURE_FAILURE.QUALITY_SELFIE_BLURRY]: {
+    label: "Necesitamos una nueva foto",
+    description:
+      "La selfie está borrosa. Tome una nueva foto sin movimiento y con buena iluminación.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  [KYC_FACE_CAPTURE_FAILURE.QUALITY_SELFIE_ERROR]: {
+    label: "Necesitamos una nueva foto",
+    description:
+      "No pudimos procesar la selfie. Tome una nueva foto clara para continuar.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+};
+
+const FACE_MATCH_PRESENTATIONS: Record<
+  (typeof KYC_FACE_COMPARISON_REASON)[keyof typeof KYC_FACE_COMPARISON_REASON],
+  KycFaceMatchPresentation
+> = {
+  [KYC_FACE_COMPARISON_REASON.APPROVED]: {
+    description: "La coincidencia facial es suficiente para aprobar la verificación.",
+    tone: KYC_STATUS_TONE.SUCCESS,
+  },
+  [KYC_FACE_COMPARISON_REASON.BELOW_THRESHOLD]: {
+    description:
+      "La coincidencia facial está por debajo del umbral requerido. La verificación no fue aprobada.",
+    tone: KYC_STATUS_TONE.DANGER,
+  },
+};
+
 const CEDULA_VERDICT_PRESENTATIONS: Record<
   DocumentCheckResult,
   Pick<KycStatusPresentation, "label" | "tone">
@@ -101,6 +178,10 @@ export function getKycStatusPresentation(
   status: KycStatus,
   reasonCode: string | null = null,
 ): KycStatusPresentation {
+  if (status === KYC_STATUS.NEEDS_REVIEW && isFaceCaptureQualityFailureReasonCode(reasonCode)) {
+    return FACE_CAPTURE_QUALITY_PRESENTATIONS[reasonCode];
+  }
+
   if (
     status === KYC_STATUS.PROCESSING_FAILED &&
     reasonCode === KYC_PROCESSING_FAILURE.DOCUMENT_PROVIDER_QUOTA_EXHAUSTED
@@ -111,6 +192,15 @@ export function getKycStatusPresentation(
   return STATUS_PRESENTATIONS[status];
 }
 
+export function isFaceCaptureQualityFailureReasonCode(
+  reasonCode: string | null,
+): reasonCode is KycFaceCaptureFailure {
+  return (
+    typeof reasonCode === "string" &&
+    Object.values(KYC_FACE_CAPTURE_FAILURE).some((code) => code === reasonCode)
+  );
+}
+
 export function formatFaceSimilarity(similarity: number | null): string | null {
   if (similarity === null || typeof similarity !== "number" || !Number.isFinite(similarity)) {
     return null;
@@ -118,6 +208,32 @@ export function formatFaceSimilarity(similarity: number | null): string | null {
 
   const percentage = Math.min(100, Math.max(0, Math.round(similarity * 100)));
   return `${percentage}%`;
+}
+
+export function getFaceMatchPresentation(
+  status: KycStatus | null | undefined,
+  reasonCode: string | null | undefined,
+  similarity: number | null,
+): KycFaceMatchPresentation | null {
+  if (
+    status === KYC_STATUS.APPROVED &&
+    reasonCode === KYC_FACE_COMPARISON_REASON.APPROVED
+  ) {
+    return formatFaceSimilarity(similarity) === null
+      ? null
+      : FACE_MATCH_PRESENTATIONS[KYC_FACE_COMPARISON_REASON.APPROVED];
+  }
+
+  if (
+    status === KYC_STATUS.REJECTED &&
+    reasonCode === KYC_FACE_COMPARISON_REASON.BELOW_THRESHOLD
+  ) {
+    return formatFaceSimilarity(similarity) === null
+      ? null
+      : FACE_MATCH_PRESENTATIONS[KYC_FACE_COMPARISON_REASON.BELOW_THRESHOLD];
+  }
+
+  return null;
 }
 
 export function getCedulaVerdictPresentation(

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import math
 from typing import Any, Optional
 
 from app.config import DEFAULT_BLUR_THRESHOLD, DEFAULT_MIN_FACE_WIDTH_PX, MAX_DECODED_IMAGE_BYTES
@@ -56,24 +57,42 @@ def evaluate_face_quality(
     4. Variance missing or below threshold   -> blurry / LOW (fail-closed)
     5. Otherwise                             -> ok / HIGH
     """
+    threshold = _as_float(blur_threshold)
+    minimum_width = _as_float(min_face_width_px)
+    if (
+        threshold is None
+        or threshold <= 0
+        or minimum_width is None
+        or minimum_width <= 0
+    ):
+        return _verdict("LOW", REASON_ERROR, None, _as_float(laplacian_variance))
     if not face_detected:
         return _verdict("LOW", REASON_NO_FACE, None, _as_float(laplacian_variance))
     if face_width_px is None:
         return _verdict("LOW", REASON_ERROR, None, _as_float(laplacian_variance))
-    width = int(round(face_width_px))
-    if width < min_face_width_px:
+    width_value = _as_float(face_width_px)
+    if width_value is None or width_value < 0:
+        return _verdict("LOW", REASON_ERROR, None, _as_float(laplacian_variance))
+    width = int(round(width_value))
+    if width < minimum_width:
         return _verdict("LOW", REASON_RESOLUTION, width, _as_float(laplacian_variance))
-    if laplacian_variance is None:
+    variance = _as_float(laplacian_variance)
+    if variance is None:
         # Cannot prove the image is sharp enough -> fail closed.
         return _verdict("LOW", REASON_BLURRY, width, None)
-    variance = float(laplacian_variance)
-    if variance < blur_threshold:
+    if variance < threshold:
         return _verdict("LOW", REASON_BLURRY, width, variance)
     return _verdict("HIGH", REASON_OK, width, variance)
 
 
 def _as_float(value: Optional[float]) -> Optional[float]:
-    return None if value is None else float(value)
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def error_verdict() -> dict:

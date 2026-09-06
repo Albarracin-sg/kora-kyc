@@ -9,7 +9,10 @@ import { toUserFacingError } from "../contexts/auth-context";
 import { useKyc } from "../contexts/kyc-context";
 import { APP_ROUTE, type AppScreenProps } from "../navigation/routes";
 import { isTerminalKycStatus } from "../services/kyc-flow";
-import { getKycStatusPresentation } from "../services/kyc-status";
+import {
+  getKycStatusPresentation,
+  isFaceCaptureQualityFailureReasonCode,
+} from "../services/kyc-status";
 import { KYC_STATUS } from "../types/api";
 import { COLORS, FONT, RADIUS, SPACING } from "../theme/theme";
 
@@ -48,6 +51,9 @@ export function KycProcessingResultScreen(
   const isValidating = verification.status === KYC_STATUS.VALIDATING;
   const isReadyToVerify = verification.status === KYC_STATUS.SELFIE_UPLOADED;
   const canRestart = isTerminalKycStatus(verification.status);
+  const isCaptureQualityFailure =
+    verification.status === KYC_STATUS.NEEDS_REVIEW &&
+    isFaceCaptureQualityFailureReasonCode(verification.reasonCode);
 
   async function handleVerify(): Promise<void> {
     setError(null);
@@ -98,6 +104,8 @@ export function KycProcessingResultScreen(
             images={verification.images}
             faceSimilarity={verification.faceSimilarity}
             statusLabel={presentation.label}
+            status={verification.status}
+            reasonCode={verification.reasonCode}
           />
         ) : null}
 
@@ -126,9 +134,20 @@ export function KycProcessingResultScreen(
           ) : null}
           {canRestart ? (
             <PrimaryButton
-                label={isSubmitting ? "Abriendo una nueva verificación" : "Iniciar una nueva verificación"}
+                label={
+                  isSubmitting
+                    ? "Abriendo una nueva verificación"
+                    : isCaptureQualityFailure
+                      ? "Tomar nuevas fotos"
+                      : "Iniciar una nueva verificación"
+                }
                onPress={confirmRestart}
               disabled={isSubmitting}
+              accessibilityHint={
+                isCaptureQualityFailure
+                  ? "Inicia una nueva verificación para capturar el documento y la selfie."
+                  : undefined
+              }
             />
           ) : null}
            <PrimaryButton label="Volver al centro de identidad" onPress={() => navigation.navigate(APP_ROUTE.HOME)} variant={BUTTON_VARIANT.GHOST} />

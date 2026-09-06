@@ -4,8 +4,8 @@ Servicio público de comparación facial para KYC, llamado sólo por el backend 
 
 **Scope (closed by decision):** FastAPI + InsightFace/ArcFace (SCRFD
 detector + ArcFace embeddings), cosine-similarity comparison, and a
-pre-comparison **quality gate** that flags small (<100 px wide) or blurry
-faces as `LOW` / `NEEDS_REVIEW`. Nothing else.
+pre-comparison **quality gate** that flags small or blurry faces as `LOW` /
+`NEEDS_REVIEW`. Nothing else.
 
 - The document OCR pipeline is untouched (it stays in the NestJS backend).
 - The NestJS backend can select this service explicitly (see
@@ -110,7 +110,8 @@ degradation.
 | `FACE_MATCH_THRESHOLD`           | `0.72`     | Cosine similarity at or above which faces match                         |
 | `FACE_HIGH_CONFIDENCE_THRESHOLD` | `0.60`     | Similarity at or above which `confidence` is `high`                  |
 | `FACE_BLUR_THRESHOLD`            | `25.0`     | Laplacian-variance floor; below it the image is `blurry`             |
-| `FACE_MIN_WIDTH_PX`              | `100`      | Minimum face width in px; strictly below is `face_resolution_too_small` |
+| `FACE_DOCUMENT_MIN_WIDTH_PX`     | `90`       | Document-only minimum face width; strictly below is `face_resolution_too_small` |
+| `FACE_SELFIE_MIN_WIDTH_PX`       | `100`      | Selfie minimum face width; unchanged and strictly below is `face_resolution_too_small` |
 | `FACE_DET_SIZE`                  | `640,640`  | SCRFD detection resolution (`W,H`)                                   |
 | `INSIGHTFACE_MODEL`              | `buffalo_l`| InsightFace model zoo name                                           |
 | `INSIGHTFACE_ROOT`               | `~/.insightface` | Directorio de modelos; en Render use el workspace efímero del servicio |
@@ -118,7 +119,8 @@ degradation.
 ## API
 
 Transport is JSON; images are **base64 strings** (never URLs, for PII
-privacy). Payloads are capped at 15 MB decoded.
+privacy). Each encoded image field is bounded before decoding, and the
+decoded payload is capped at 15 MB.
 
 ### `GET /health`
 
@@ -142,7 +144,7 @@ Response - one verdict per image, keyed by field name:
 ```json
 {
   "document": { "quality": "LOW", "reason": "face_resolution_too_small",
-                "face_width_px": 95, "laplacian_variance": 188.4,
+                "face_width_px": 89, "laplacian_variance": 188.4,
                 "action": "NEEDS_REVIEW" },
   "selfie":   { "quality": "HIGH", "reason": "ok",
                 "face_width_px": 240, "laplacian_variance": 92.1,
@@ -155,9 +157,20 @@ Reasons: `ok` | `face_resolution_too_small` | `blurry` | `no_face` | `error`.
 Rules, checked in order:
 
 1. No detectable face -> `no_face` / `LOW`.
-2. Face width strictly below `FACE_MIN_WIDTH_PX` -> `face_resolution_too_small`.
+2. Face width strictly below the image-specific minimum -> `face_resolution_too_small`.
 3. Laplacian variance below `FACE_BLUR_THRESHOLD` (or not computable) -> `blurry` (fail-closed).
 4. Otherwise -> `HIGH` / `OK`.
+
+Document orientation is normalized conservatively by testing `0`, `90`, `180`
+and `270` degrees clockwise. The selected candidate is deterministic: a
+`HIGH`/`OK` candidate wins first, followed by detected-face confidence and
+geometry, with the original `0` degree orientation as the final tie-breaker.
+The selfie is evaluated only at `0` degrees. The same selector is used by
+both `/face/quality` and `/face/compare`; the face retained by compare comes
+from that selected document orientation, never from the unnormalized image.
+The document floor is `90px`; the example uses `89px` to show the strictly
+below-floor outcome. The selfie floor stays at `100px`, and neither the blur
+nor no-face gate is bypassed.
 
 ### `POST /face/compare`
 
@@ -184,6 +197,9 @@ embeddings are never computed or compared and the result is
 - Best face per image (highest detection score) -> ArcFace embedding.
 - `similarity` = cosine similarity; `match` = `similarity >= FACE_MATCH_THRESHOLD`.
 - `confidence` = `high` if `similarity >= FACE_HIGH_CONFIDENCE_THRESHOLD`, else `low`.
+- `confidence` is an informational similarity label, not a Human/TFJS detector
+  confidence threshold. The NestJS remote contract does not apply its
+  local-only confidence or euclidean-distance settings to this field.
 - `action` = `MATCHED` | `NO_MATCH`.
 
 Example:

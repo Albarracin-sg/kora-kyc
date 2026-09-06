@@ -5,6 +5,7 @@ import {
   DOCUMENT_EXTRACTION_RESPONSE_REQUIRED_FIELDS,
   DOCUMENT_EXTRACTION_RESPONSE_FAILURE,
   DOCUMENT_EXTRACTION_RESPONSE_SCHEMA,
+  isDocumentExtractionReasonCode,
   parseDocumentExtractionResponse,
 } from "../src/kyc/providers/document-extraction-response";
 import { DOCUMENT_PARSE_OUTCOME } from "../src/kyc/providers/document-extraction.provider";
@@ -150,17 +151,49 @@ describe("document extraction response contract", () => {
   );
 
   it.each([
+    "FACE_STORAGE_READ_FAILED",
+    "FACE_RUNTIME_FAILED",
+    "FACE_MODEL_UNAVAILABLE",
+    "VERIFICATION_NOT_VALIDATING",
+    "FACE_IMAGE_UNAVAILABLE",
+    "FACE_CAPTURE_QUALITY_LOW",
+    "FACE_CAPTURE_QUALITY_DOCUMENT_FACE_RESOLUTION_TOO_SMALL",
+    "FACE_SIMILARITY_BELOW_THRESHOLD",
+    "KYC_APPROVED",
+    "UNKNOWN_REASON",
     "DOCUMENT_NUMBER_12345678",
     "BIRTH_DATE_1990-05-16",
     "FULL_NAME_MARIA_ELENA_GOMEZ",
     "document number exposed",
-  ])("maps dynamic or PII-bearing reason %j to the safe fallback", (reason) => {
+  ])("maps non-document, unknown, or PII-bearing reason %j to the safe fallback", (reason) => {
     const result = parseResponse({ reason });
 
     expect(result.parsedDocument.reasonCode).toBe(
       DOCUMENT_EXTRACTION_REASON_CODE.DOCUMENT_REASON_UNSPECIFIED,
     );
     expect(result.parsedDocument).not.toHaveProperty("reason");
+  });
+
+  it.each([
+    "KYC_APPROVED",
+    "FACE_SIMILARITY_BELOW_THRESHOLD",
+    "FACE_CAPTURE_QUALITY_LOW",
+    "FACE_RUNTIME_FAILED",
+    "FACE_STORAGE_READ_FAILED",
+  ])("does not classify worker or facial outcome %s as a document reason", (reason) => {
+    expect(isDocumentExtractionReasonCode(reason)).toBe(false);
+  });
+
+  it("preserves the document result while sanitizing a facial reason", () => {
+    const result = parseResponse({
+      result: DOCUMENT_PARSE_OUTCOME.REVIEW,
+      reason: "FACE_CAPTURE_QUALITY_LOW",
+    });
+
+    expect(result.parsedDocument.outcome).toBe(DOCUMENT_PARSE_OUTCOME.REVIEW);
+    expect(result.parsedDocument.reasonCode).toBe(
+      DOCUMENT_EXTRACTION_REASON_CODE.DOCUMENT_REASON_UNSPECIFIED,
+    );
   });
 
   it("classifies unsupported evidence as REJECT and ambiguous evidence as REVIEW", () => {

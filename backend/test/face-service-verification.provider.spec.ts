@@ -238,6 +238,33 @@ describe("Face service verification provider", () => {
     expect(result.selfieFaceCount).toBe(1);
   });
 
+  it("uses remote quality and cosine similarity without applying local-only thresholds", async () => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(
+        200,
+        JSON.stringify({
+          match: true,
+          similarity: 0.72,
+          confidence: "low",
+          quality_document: "HIGH",
+          quality_selfie: "HIGH",
+          action: "MATCHED",
+          reasons: { document: "ok", selfie: "ok" },
+        }),
+      ),
+    );
+
+    const result = await createProvider(fetchStub.fetch, {
+      KYC_LOCAL_FACE_MAX_DISTANCE: "0.01",
+      KYC_LOCAL_FACE_MIN_CONFIDENCE: "1",
+    }).verify(DOCUMENT_IMAGE, SELFIE_IMAGE);
+
+    expect(result.accepted).toBe(true);
+    expect(result.similarity).toBe(0.72);
+    expect(result.distance).toBeCloseTo(0.28, 12);
+  });
+
   it("fails closed when the submitted document image is not HIGH quality", async () => {
     const fetchStub = createFetchStub(
       createFetchResponse(
@@ -248,7 +275,7 @@ describe("Face service verification provider", () => {
 
     await expectFaceCaptureError(
       createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
-      FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW,
+      FACE_CAPTURE_FAILURE_CODE.QUALITY_DOCUMENT_BLURRY,
     );
 
     expect(fetchStub.calls).toHaveLength(1);
@@ -264,8 +291,40 @@ describe("Face service verification provider", () => {
 
     await expectFaceCaptureError(
       createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
-      FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW,
+      FACE_CAPTURE_FAILURE_CODE.QUALITY_SELFIE_BLURRY,
     );
+  });
+
+  it.each([
+    ["document", "no_face", FACE_CAPTURE_FAILURE_CODE.QUALITY_DOCUMENT_NO_FACE],
+    [
+      "document",
+      "face_resolution_too_small",
+      FACE_CAPTURE_FAILURE_CODE.QUALITY_DOCUMENT_FACE_RESOLUTION_TOO_SMALL,
+    ],
+    ["document", "blurry", FACE_CAPTURE_FAILURE_CODE.QUALITY_DOCUMENT_BLURRY],
+    ["document", "error", FACE_CAPTURE_FAILURE_CODE.QUALITY_DOCUMENT_ERROR],
+    ["selfie", "no_face", FACE_CAPTURE_FAILURE_CODE.QUALITY_SELFIE_NO_FACE],
+    [
+      "selfie",
+      "face_resolution_too_small",
+      FACE_CAPTURE_FAILURE_CODE.QUALITY_SELFIE_FACE_RESOLUTION_TOO_SMALL,
+    ],
+    ["selfie", "blurry", FACE_CAPTURE_FAILURE_CODE.QUALITY_SELFIE_BLURRY],
+    ["selfie", "error", FACE_CAPTURE_FAILURE_CODE.QUALITY_SELFIE_ERROR],
+  ] as const)("maps %s %s to its canonical safe failure code", async (side, reason, code) => {
+    const lowQuality = { quality: "LOW", reason, action: "NEEDS_REVIEW" };
+    const document = side === "document" ? lowQuality : {};
+    const selfie = side === "selfie" ? lowQuality : {};
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, createQualityResponse(document, selfie)),
+    );
+
+    await expectFaceCaptureError(
+      createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
+      code,
+    );
+    expect(fetchStub.calls).toHaveLength(1);
   });
 
   it("does not compare when HIGH quality is paired with a non-OK action", async () => {
@@ -278,7 +337,7 @@ describe("Face service verification provider", () => {
 
     await expectFaceCaptureError(
       createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
-      FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW,
+      FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
     );
 
     expect(fetchStub.calls).toHaveLength(1);
@@ -303,7 +362,33 @@ describe("Face service verification provider", () => {
 
     await expectFaceCaptureError(
       createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
-      FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW,
+      FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
+    );
+  });
+
+  it.each([
+    ["document", { document: "blurry", selfie: "ok" }],
+    ["selfie", { document: "ok", selfie: "no_face" }],
+  ] as const)("rejects a terminal compare response with a non-OK %s reason", (_side, reasons) => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(
+        200,
+        JSON.stringify({
+          match: true,
+          similarity: 0.8,
+          confidence: "high",
+          quality_document: "HIGH",
+          quality_selfie: "HIGH",
+          action: "MATCHED",
+          reasons,
+        }),
+      ),
+    );
+
+    return expectFaceCaptureError(
+      createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
+      FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
     );
   });
 

@@ -21,8 +21,8 @@ const CONFIG_DEFAULTS = {
   ocrMinimumConfidence: 0.65,
   jobLockTimeoutMs: 60_000,
   faceMinimumSimilarity: 0.72,
-  faceMaximumDistance: 0.85,
-  faceMinimumConfidence: 0.65,
+  localFaceMaximumDistance: 0.85,
+  localFaceMinimumConfidence: 0.65,
   rateLimitEnabled: true,
   rateLimitDefaultLimit: 100,
   rateLimitDefaultTtlMs: 60_000,
@@ -96,8 +96,8 @@ export interface AppConfiguration {
   ocrMinimumConfidence: number;
   jobLockTimeoutMs: number;
   faceMinimumSimilarity: number;
-  faceMaximumDistance: number;
-  faceMinimumConfidence: number;
+  localFaceMaximumDistance: number;
+  localFaceMinimumConfidence: number;
   documentHashPepper: string;
   documentProvider: KycDocumentProvider;
   faceVerificationProvider: FaceVerificationProviderName;
@@ -444,15 +444,15 @@ export function createAppConfiguration(
       "KYC_FACE_MIN_SIMILARITY",
       CONFIG_DEFAULTS.faceMinimumSimilarity,
     ),
-    faceMaximumDistance: readUnitInterval(
+    localFaceMaximumDistance: readUnitInterval(
       environment,
-      "KYC_FACE_MAX_DISTANCE",
-      CONFIG_DEFAULTS.faceMaximumDistance,
+      "KYC_LOCAL_FACE_MAX_DISTANCE",
+      CONFIG_DEFAULTS.localFaceMaximumDistance,
     ),
-    faceMinimumConfidence: readUnitInterval(
+    localFaceMinimumConfidence: readUnitInterval(
       environment,
-      "KYC_FACE_MIN_CONFIDENCE",
-      CONFIG_DEFAULTS.faceMinimumConfidence,
+      "KYC_LOCAL_FACE_MIN_CONFIDENCE",
+      CONFIG_DEFAULTS.localFaceMinimumConfidence,
     ),
     documentHashPepper: requiredEnvironmentValue(environment, "KYC_DOCUMENT_HASH_PEPPER"),
     documentProvider,

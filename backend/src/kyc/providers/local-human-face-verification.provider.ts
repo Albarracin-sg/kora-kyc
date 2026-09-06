@@ -26,12 +26,27 @@ export const FACE_CAPTURE_FAILURE_CODE = {
   LOW_CONFIDENCE: "LOW_CONFIDENCE",
   EMBEDDING_UNAVAILABLE: "EMBEDDING_UNAVAILABLE",
   QUALITY_LOW: "QUALITY_LOW",
+  QUALITY_DOCUMENT_NO_FACE: "QUALITY_DOCUMENT_NO_FACE",
+  QUALITY_DOCUMENT_FACE_RESOLUTION_TOO_SMALL: "QUALITY_DOCUMENT_FACE_RESOLUTION_TOO_SMALL",
+  QUALITY_DOCUMENT_BLURRY: "QUALITY_DOCUMENT_BLURRY",
+  QUALITY_DOCUMENT_ERROR: "QUALITY_DOCUMENT_ERROR",
+  QUALITY_SELFIE_NO_FACE: "QUALITY_SELFIE_NO_FACE",
+  QUALITY_SELFIE_FACE_RESOLUTION_TOO_SMALL: "QUALITY_SELFIE_FACE_RESOLUTION_TOO_SMALL",
+  QUALITY_SELFIE_BLURRY: "QUALITY_SELFIE_BLURRY",
+  QUALITY_SELFIE_ERROR: "QUALITY_SELFIE_ERROR",
   FACE_SERVICE_UNAVAILABLE: "FACE_SERVICE_UNAVAILABLE",
   INVALID_RESPONSE: "INVALID_RESPONSE",
 } as const;
 
 export type FaceCaptureFailureCode =
   (typeof FACE_CAPTURE_FAILURE_CODE)[keyof typeof FACE_CAPTURE_FAILURE_CODE];
+
+export function isFaceCaptureFailureCode(value: unknown): value is FaceCaptureFailureCode {
+  return (
+    typeof value === "string" &&
+    Object.values(FACE_CAPTURE_FAILURE_CODE).some((code) => code === value)
+  );
+}
 
 export class FaceCaptureError extends Error {
   constructor(readonly code: FaceCaptureFailureCode) {
@@ -262,12 +277,15 @@ export class LocalHumanFaceVerificationProvider implements FaceVerificationProvi
         selfieImage,
         FACE_DETECTION_MODE.SELFIE,
       );
-      const { faceMinimumSimilarity, faceMaximumDistance } = this.configService.values;
+      const {
+        faceMinimumSimilarity,
+        localFaceMaximumDistance,
+      } = this.configService.values;
       const distance = calculateFaceDistance(documentEmbedding, selfieEmbedding);
       const similarity = calculateFaceSimilarity(
         documentEmbedding,
         selfieEmbedding,
-        faceMaximumDistance,
+        localFaceMaximumDistance,
       );
 
       return {
@@ -279,7 +297,7 @@ export class LocalHumanFaceVerificationProvider implements FaceVerificationProvi
           documentEmbedding,
           selfieEmbedding,
           faceMinimumSimilarity,
-          faceMaximumDistance,
+          localFaceMaximumDistance,
         ),
       };
     });
@@ -339,7 +357,7 @@ export class LocalHumanFaceVerificationProvider implements FaceVerificationProvi
         faceResult.boxScore >= HUMAN_ENGINE_CONFIGURATION.face.detector.minConfidence,
     );
     const face = this.selectUsableFace(faces ?? [], FACE_DETECTION_MODE.SELFIE);
-    if (face.boxScore < this.configService.values.faceMinimumConfidence) {
+    if (face.boxScore < this.configService.values.localFaceMinimumConfidence) {
       throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.LOW_CONFIDENCE);
     }
     return this.requireUsableEmbedding(face);

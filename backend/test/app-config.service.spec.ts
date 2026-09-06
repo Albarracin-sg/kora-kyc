@@ -68,6 +68,20 @@ describe("createAppConfiguration face verification provider", () => {
     expect(config.faceServiceTimeoutMs).toBe(30_000);
   });
 
+  it("keeps distance and detector confidence settings explicitly local-only", () => {
+    const config = createAppConfiguration(
+      {
+        ...baseEnvironment(),
+        KYC_LOCAL_FACE_MAX_DISTANCE: "0.4",
+        KYC_LOCAL_FACE_MIN_CONFIDENCE: "0.8",
+      },
+      process.cwd(),
+    );
+
+    expect(config.localFaceMaximumDistance).toBe(0.4);
+    expect(config.localFaceMinimumConfidence).toBe(0.8);
+  });
+
   it("rejects an unknown face verification provider value", () => {
     expect(() =>
       createAppConfiguration(

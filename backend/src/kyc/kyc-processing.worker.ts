@@ -33,8 +33,10 @@ import {
 } from "./providers/external-document-provider.error";
 import { isDocumentExtractionReasonCode } from "./providers/document-extraction-response";
 import {
+  FACE_CAPTURE_FAILURE_CODE,
   FaceCaptureError,
   FaceModelUnavailableError,
+  isFaceCaptureFailureCode,
 } from "./providers/local-human-face-verification.provider";
 import type { FaceVerificationProvider, FaceVerificationResult } from "./providers/face-verification.provider";
 import type { FileStorage } from "./storage/file-storage.port";
@@ -359,7 +361,9 @@ export class KycProcessingWorker {
       if (error instanceof FaceCaptureError) {
         await this.complete(job, verification, {
           status: KYC_STATUS.NEEDS_REVIEW,
-          reasonCode: `FACE_CAPTURE_${error.code}`,
+          reasonCode: isFaceCaptureFailureCode(error.code)
+            ? `FACE_CAPTURE_${error.code}`
+            : `FACE_CAPTURE_${FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE}`,
           documentType: null,
           documentNumberHash: null,
           ...this.documentProfileFields(extractedDocument),
@@ -630,6 +634,10 @@ export class KycProcessingWorker {
     faceResult: FaceVerificationResult,
     extraction: DocumentExtractionResult,
   ): KycTerminalOutcome {
+    if (!this.isValidFaceResult(faceResult)) {
+      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
+    }
+
     const parsedDocument = extraction.parsedDocument;
     const documentNumber = parsedDocument.documentNumber;
     if (!documentNumber || !parsedDocument.documentType) {
@@ -652,6 +660,24 @@ export class KycProcessingWorker {
       faceDistance: faceResult.distance,
       faceSimilarity: faceResult.similarity,
     };
+  }
+
+  private isValidFaceResult(faceResult: FaceVerificationResult): boolean {
+    return (
+      typeof faceResult === "object" &&
+      faceResult !== null &&
+      faceResult.documentFaceCount === 1 &&
+      faceResult.selfieFaceCount === 1 &&
+      typeof faceResult.accepted === "boolean" &&
+      Number.isFinite(faceResult.distance) &&
+      faceResult.distance >= 0 &&
+      faceResult.distance <= 2 &&
+      Number.isFinite(faceResult.similarity) &&
+      faceResult.similarity >= -1 &&
+      faceResult.similarity <= 1 &&
+      faceResult.accepted ===
+        (faceResult.similarity >= this.configService.values.faceMinimumSimilarity)
+    );
   }
 
   private processingFailedOutcome(reasonCode: string): KycTerminalOutcome {

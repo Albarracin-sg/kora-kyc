@@ -77,7 +77,11 @@ Por defecto la comparación facial es local con Human/TFJS. Para delegarla al se
    - `FACE_API_KEY` (obligatoria y compartida con el face-service; nunca `EXPO_PUBLIC_*`).
 3. Reiniciar la API.
 
-Semántica: el backend envía al face-service únicamente la imagen `FRONT` (o la `COMBINED` confirmada por el proveedor documental con ambos lados) junto con la selfie; nunca `BACK`, y añade `X-API-Key` en cada petición. El servicio devuelve similaridad coseno y calidad de imagen, y el worker aplica los umbrales KYC configurables (`KYC_FACE_MIN_SIMILARITY`, `KYC_FACE_MAX_DISTANCE`, `KYC_FACE_MIN_CONFIDENCE`). Ante timeout, error de red, respuesta inválida, falta de autenticación o calidad insuficiente, el flujo falla cerrado (`NEEDS_REVIEW` o `PROCESSING_FAILED`) y nunca aprueba por degradación.
+Semántica: el backend envía al face-service únicamente la imagen `FRONT` (o la `COMBINED` confirmada por el proveedor documental con ambos lados) junto con la selfie; nunca `BACK`, y añade `X-API-Key` en cada petición. El contrato remoto exige calidad `HIGH` y acción `OK`, y valida la similaridad coseno finita en `[-1, 1]`, su distancia derivada `1 - similarity` en `[0, 2]`, y la coherencia entre `match`, `action` y `KYC_FACE_MIN_SIMILARITY` (por defecto `0.72`). Ante timeout, error de red, respuesta inválida, falta de autenticación o calidad insuficiente, el flujo falla cerrado (`NEEDS_REVIEW` o `PROCESSING_FAILED`) y nunca aprueba por degradación.
+
+`KYC_LOCAL_FACE_MAX_DISTANCE` y `KYC_LOCAL_FACE_MIN_CONFIDENCE` son límites exclusivos del proveedor local Human/TFJS: el primero escala la distancia euclidiana normalizada y el segundo filtra la confianza del detector de selfie. No se envían al face-service ni se aplican a su similaridad coseno. El campo remoto `confidence` (`high`/`low`) es una etiqueta informativa derivada de la similaridad del servicio y no es la confianza del detector local; por eso una respuesta remota válida puede contener `confidence: "low"`.
+
+Cuando el endpoint de calidad devuelve una captura `LOW`, el worker conserva un código de revisión allowlisted que identifica lado y razón canónica, por ejemplo `FACE_CAPTURE_QUALITY_DOCUMENT_BLURRY` o `FACE_CAPTURE_QUALITY_SELFIE_NO_FACE`. Nunca incorpora la razón textual sin validar ni contenido de la imagen en logs o respuestas.
 
 ## Documentación de la API (OpenAPI y Scalar)
 

@@ -13,12 +13,13 @@ can never approve).  500 is reserved for health/config failures.
 from __future__ import annotations
 
 from secrets import compare_digest
-from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.face_service import assess_image, finalize_compare, get_analyzer
+from app.face_service import IMAGE_KIND, assess_image, finalize_compare, get_analyzer
 from app.quality import decode_base64_image, error_verdict
 from app.schemas import CompareResponse, FaceImagesRequest, QualityResponse
 
@@ -29,6 +30,15 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(
+    _request: Request,
+    _exc: RequestValidationError,
+) -> JSONResponse:
+    """Return a generic validation error without echoing the rejected payload."""
+    return JSONResponse(status_code=422, content={"detail": "invalid request payload"})
 
 
 def require_api_key(x_api_key: str = Header(default="")) -> None:
@@ -54,21 +64,33 @@ def health() -> dict:
 def face_quality(payload: FaceImagesRequest) -> dict:
     settings = get_settings()
 
-    def _assess(payload_str: str) -> dict:
+    def _assess(payload_str: str, image_kind: str, min_face_width_px: int) -> dict:
         try:
             image = decode_base64_image(payload_str)
             verdict, _ = assess_image(
                 get_analyzer(),
                 image,
                 blur_threshold=settings.blur_threshold,
-                min_face_width_px=settings.min_face_width_px,
+                min_face_width_px=min_face_width_px,
+                image_kind=image_kind,
             )
             del image
             return verdict
         except Exception:
             return error_verdict()
 
-    return {"document": _assess(payload.document_face), "selfie": _assess(payload.selfie)}
+    return {
+        "document": _assess(
+            payload.document_face,
+            IMAGE_KIND["DOCUMENT"],
+            settings.document_min_face_width_px,
+        ),
+        "selfie": _assess(
+            payload.selfie,
+            IMAGE_KIND["SELFIE"],
+            settings.selfie_min_face_width_px,
+        ),
+    }
 
 
 @app.post("/face/compare", response_model=CompareResponse, dependencies=[Depends(require_api_key)])
@@ -82,7 +104,7 @@ def face_compare(payload: FaceImagesRequest) -> dict:
         # for both images rather than approving anything by degradation.
         analyzer = None
 
-    def _load(payload_str: str):
+    def _load(payload_str: str, image_kind: str, min_face_width_px: int):
         if analyzer is None:
             return error_verdict(), None
         try:
@@ -91,15 +113,24 @@ def face_compare(payload: FaceImagesRequest) -> dict:
                 analyzer,
                 image,
                 blur_threshold=settings.blur_threshold,
-                min_face_width_px=settings.min_face_width_px,
+                min_face_width_px=min_face_width_px,
+                image_kind=image_kind,
             )
             del image
             return verdict, face
         except Exception:
             return error_verdict(), None
 
-    document_quality, document_face = _load(payload.document_face)
-    selfie_quality, selfie_face = _load(payload.selfie)
+    document_quality, document_face = _load(
+        payload.document_face,
+        IMAGE_KIND["DOCUMENT"],
+        settings.document_min_face_width_px,
+    )
+    selfie_quality, selfie_face = _load(
+        payload.selfie,
+        IMAGE_KIND["SELFIE"],
+        settings.selfie_min_face_width_px,
+    )
     return finalize_compare(
         document_quality=document_quality,
         selfie_quality=selfie_quality,

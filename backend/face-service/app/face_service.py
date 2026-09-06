@@ -13,6 +13,7 @@ import time and never in the test suite.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Any, Optional, Sequence
 
 from app.config import (
@@ -24,8 +25,15 @@ from app.quality import (
     REASON_ERROR,
     REASON_NO_FACE,
     compute_laplacian_variance,
+    error_verdict,
     evaluate_face_quality,
 )
+
+IMAGE_KIND = {
+    "DOCUMENT": "document",
+    "SELFIE": "selfie",
+}
+DOCUMENT_ORIENTATION_DEGREES = (0, 90, 180, 270)
 
 # --- Pure helpers (dependency-light, unit-testable) ---
 
@@ -59,8 +67,17 @@ def _face_score(face: Any) -> Optional[float]:
     """
     det = getattr(face, "det_score", None)
     if det is not None:
-        return float(det)
-    return getattr(face, "score", None)
+        try:
+            score = float(det)
+        except (TypeError, ValueError):
+            return None
+        return score if math.isfinite(score) else None
+    score = getattr(face, "score", None)
+    try:
+        score = float(score)
+    except (TypeError, ValueError):
+        return None
+    return score if math.isfinite(score) else None
 
 
 def select_best_face(faces: Sequence[Any]) -> Optional[Any]:
@@ -112,6 +129,14 @@ def _needs_review(
     }
 
 
+def _is_high_quality(verdict: dict) -> bool:
+    return (
+        verdict.get("quality") == "HIGH"
+        and verdict.get("reason") == "ok"
+        and verdict.get("action") == "OK"
+    )
+
+
 def finalize_compare(
     *,
     document_quality: dict,
@@ -128,7 +153,7 @@ def finalize_compare(
     `similarity=None`, so a degraded input can never approve a match.
     """
     reasons = {"document": document_quality["reason"], "selfie": selfie_quality["reason"]}
-    if document_quality["quality"] != "HIGH" or selfie_quality["quality"] != "HIGH":
+    if not _is_high_quality(document_quality) or not _is_high_quality(selfie_quality):
         return _needs_review(
             document_quality["quality"], selfie_quality["quality"], reasons
         )
@@ -140,7 +165,16 @@ def finalize_compare(
         reasons["selfie"] = REASON_NO_FACE if selfie_face is None else REASON_ERROR
         return _needs_review("HIGH", "HIGH", reasons)
 
-    similarity = cosine_similarity(doc_embedding, selfie_embedding)
+    try:
+        similarity = cosine_similarity(doc_embedding, selfie_embedding)
+    except (TypeError, ValueError, OverflowError):
+        reasons["document"] = REASON_ERROR
+        reasons["selfie"] = REASON_ERROR
+        return _needs_review("HIGH", "HIGH", reasons)
+    if not math.isfinite(similarity) or similarity < -1.0 or similarity > 1.0:
+        reasons["document"] = REASON_ERROR
+        reasons["selfie"] = REASON_ERROR
+        return _needs_review("HIGH", "HIGH", reasons)
     match = similarity >= match_threshold
     confidence = "high" if similarity >= high_confidence_threshold else "low"
     return {
@@ -157,37 +191,159 @@ def finalize_compare(
 # --- Glue between the detector and the quality gate ---
 
 
+@dataclass(frozen=True)
+class ImageAssessment:
+    """The quality verdict and face produced from one chosen orientation."""
+
+    verdict: dict
+    face: Any
+    orientation_degrees: int
+
+
+def rotate_image(image_bgr: Any, orientation_degrees: int) -> Any:
+    """Rotate an image clockwise without changing the selfie path."""
+    if orientation_degrees == 0:
+        return image_bgr
+    try:
+        import cv2
+    except ImportError as exc:  # pragma: no cover - deployment issue
+        raise RuntimeError("image orientation normalization unavailable") from exc
+
+    rotation_codes = {
+        90: cv2.ROTATE_90_CLOCKWISE,
+        180: cv2.ROTATE_180,
+        270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+    }
+    rotation_code = rotation_codes.get(orientation_degrees)
+    if rotation_code is None:
+        raise ValueError("unsupported image orientation")
+    return cv2.rotate(image_bgr, rotation_code)
+
+
+def _orientation_candidates(image_kind: str) -> tuple[int, ...]:
+    if image_kind == IMAGE_KIND["DOCUMENT"]:
+        return DOCUMENT_ORIENTATION_DEGREES
+    if image_kind == IMAGE_KIND["SELFIE"]:
+        return (0,)
+    raise ValueError("unsupported image kind")
+
+
+def _assessment_rank(assessment: ImageAssessment, orientation_index: int) -> tuple:
+    """Prefer a valid face, then stronger geometry/confidence, then 0°."""
+    verdict = assessment.verdict
+    face = assessment.face
+    score = _face_score(face)
+    width = face_width_px(face) if face is not None else None
+    variance = verdict.get("laplacian_variance")
+    finite_variance = (
+        float(variance)
+        if isinstance(variance, (int, float)) and math.isfinite(float(variance))
+        else -1.0
+    )
+    return (
+        int(_is_high_quality(verdict)),
+        int(face is not None),
+        score if score is not None else -1.0,
+        width if width is not None else -1,
+        finite_variance,
+        -orientation_index,
+    )
+
+
+def _assess_orientation(
+    model: Any,
+    image_bgr: Any,
+    orientation_degrees: int,
+    *,
+    blur_threshold: float,
+    min_face_width_px: int,
+) -> ImageAssessment:
+    oriented_image = image_bgr
+    try:
+        oriented_image = rotate_image(image_bgr, orientation_degrees)
+        faces = model.get(oriented_image) if model is not None else []
+        best = select_best_face(faces)
+        variance = compute_laplacian_variance(oriented_image)
+        if best is None:
+            verdict = evaluate_face_quality(
+                face_detected=False,
+                laplacian_variance=variance,
+                blur_threshold=blur_threshold,
+                min_face_width_px=min_face_width_px,
+            )
+            return ImageAssessment(verdict, None, orientation_degrees)
+        verdict = evaluate_face_quality(
+            face_detected=True,
+            face_width_px=face_width_px(best),
+            laplacian_variance=variance,
+            blur_threshold=blur_threshold,
+            min_face_width_px=min_face_width_px,
+        )
+        return ImageAssessment(verdict, best, orientation_degrees)
+    except Exception:
+        return ImageAssessment(error_verdict(), None, orientation_degrees)
+    finally:
+        # Face objects retain the embedding and geometry needed by the caller;
+        # the temporary rotated pixel buffer is no longer needed.
+        if oriented_image is not image_bgr:
+            del oriented_image
+
+
+def assess_image_with_orientation(
+    model: Any,
+    image_bgr: Any,
+    *,
+    blur_threshold: float,
+    min_face_width_px: int,
+    image_kind: str = IMAGE_KIND["DOCUMENT"],
+) -> ImageAssessment:
+    """Assess one image and retain the face from the selected orientation.
+
+    Document images use a deterministic 0/90/180/270° selection.  Selfies
+    deliberately use only their captured orientation.  The deterministic
+    selection is shared by `/face/quality` and `/face/compare`, so a quality
+    pass and the later embedding comparison cannot use different rotations.
+    """
+    candidates = _orientation_candidates(image_kind)
+    assessments = [
+        _assess_orientation(
+            model,
+            image_bgr,
+            orientation_degrees,
+            blur_threshold=blur_threshold,
+            min_face_width_px=min_face_width_px,
+        )
+        for orientation_degrees in candidates
+    ]
+    return max(
+        assessments,
+        key=lambda assessment: _assessment_rank(
+            assessment, candidates.index(assessment.orientation_degrees)
+        ),
+    )
+
+
 def assess_image(
     model: Any,
     image_bgr: Any,
     *,
     blur_threshold: float,
     min_face_width_px: int,
+    image_kind: str = IMAGE_KIND["DOCUMENT"],
 ) -> tuple:
-    """Detect the best face and evaluate the quality verdict for an image.
+    """Select an oriented face and evaluate the quality verdict for an image.
 
-    Returns `(verdict, best_face)`; the caller reuses `best_face` for
-    the embedding comparison so face detection runs once per image.
+    Returns `(verdict, best_face)`; the caller reuses `best_face` from the
+    selected orientation for the embedding comparison.
     """
-    faces = model.get(image_bgr) if model is not None else []
-    best = select_best_face(faces)
-    variance = compute_laplacian_variance(image_bgr)
-    if best is None:
-        verdict = evaluate_face_quality(
-            face_detected=False,
-            laplacian_variance=variance,
-            blur_threshold=blur_threshold,
-            min_face_width_px=min_face_width_px,
-        )
-        return verdict, None
-    verdict = evaluate_face_quality(
-        face_detected=True,
-        face_width_px=face_width_px(best),
-        laplacian_variance=variance,
+    assessment = assess_image_with_orientation(
+        model,
+        image_bgr,
         blur_threshold=blur_threshold,
         min_face_width_px=min_face_width_px,
+        image_kind=image_kind,
     )
-    return verdict, best
+    return assessment.verdict, assessment.face
 
 
 # --- Real InsightFace pipeline (lazy) ---

@@ -93,6 +93,26 @@ describe("CedulaDataCard", () => {
     expect(screen.getAllByText("—")).toHaveLength(9);
   });
 
+  it("keeps nationality as a dash when the document type is not confirmed", () => {
+    render(
+      <CedulaDataCard
+        fullName="PEPITA PEREZ"
+        documentNumber="12345678"
+        birthDate={null}
+        issueDate={null}
+        sex={null}
+        height={null}
+        bloodType={null}
+        birthPlace={null}
+        nationality={null}
+        checkResult={DOCUMENT_CHECK_RESULT.REVIEW}
+      />,
+    );
+
+    expect(screen.getByText("Nacionalidad")).toBeOnTheScreen();
+    expect(screen.getAllByText("—")).toHaveLength(7);
+  });
+
   it("does not imply validity for a review verdict", () => {
     render(
       <CedulaDataCard

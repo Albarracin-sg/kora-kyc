@@ -53,10 +53,6 @@ services:
         value: face_service
       - key: KYC_FACE_MIN_SIMILARITY
         value: "0.72"
-      - key: KYC_FACE_MAX_DISTANCE
-        value: "0.85"
-      - key: KYC_FACE_MIN_CONFIDENCE
-        value: "0.65"
       - key: JWT_SECRET
         sync: false
       - key: KYC_DOCUMENT_HASH_PEPPER
@@ -89,7 +85,11 @@ services:
         value: "0.60"
       - key: FACE_BLUR_THRESHOLD
         value: "25.0"
-      - key: FACE_MIN_WIDTH_PX
+      # The document-only floor addresses the observed ~95px card portrait;
+      # the selfie floor remains at the historical 100px minimum.
+      - key: FACE_DOCUMENT_MIN_WIDTH_PX
+        value: "90"
+      - key: FACE_SELFIE_MIN_WIDTH_PX
         value: "100"
 
 databases:

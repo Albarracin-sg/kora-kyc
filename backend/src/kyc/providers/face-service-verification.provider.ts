@@ -7,6 +7,7 @@ import {
   FACE_CAPTURE_FAILURE_CODE,
   FaceCaptureError,
 } from "./local-human-face-verification.provider";
+import type { FaceCaptureFailureCode } from "./local-human-face-verification.provider";
 import type {
   FaceVerificationProvider,
   FaceVerificationResult,
@@ -33,11 +34,11 @@ interface FaceServiceRequest {
 }
 
 interface FaceServiceQualityItem {
-  quality: string;
-  reason: string;
+  quality: FaceServiceQuality;
+  reason: FaceServiceQualityReason;
   face_width_px: number | null;
   laplacian_variance: number | null;
-  action: string;
+  action: FaceServiceQualityAction;
 }
 
 interface FaceServiceQualityResponse {
@@ -48,11 +49,13 @@ interface FaceServiceQualityResponse {
 interface FaceServiceCompareResponse {
   match: boolean;
   similarity: number | null;
-  confidence: string | null;
-  quality_document: string;
-  quality_selfie: string;
-  action: string;
-  reasons: Record<string, string>;
+  // Informational label derived from remote cosine similarity; it is not the
+  // local Human detector confidence and must not be used as that threshold.
+  confidence: FaceServiceConfidence | null;
+  quality_document: FaceServiceQuality;
+  quality_selfie: FaceServiceQuality;
+  action: FaceServiceCompareAction;
+  reasons: Record<FaceServiceQualitySide, FaceServiceQualityReason>;
 }
 
 const FACE_SERVICE_COMPARE_ACTION = {
@@ -61,9 +64,74 @@ const FACE_SERVICE_COMPARE_ACTION = {
   NEEDS_REVIEW: "NEEDS_REVIEW",
 } as const;
 
+type FaceServiceCompareAction =
+  (typeof FACE_SERVICE_COMPARE_ACTION)[keyof typeof FACE_SERVICE_COMPARE_ACTION];
+
+const FACE_SERVICE_QUALITY = {
+  HIGH: "HIGH",
+  LOW: "LOW",
+} as const;
+
+type FaceServiceQuality = (typeof FACE_SERVICE_QUALITY)[keyof typeof FACE_SERVICE_QUALITY];
+
 const FACE_SERVICE_QUALITY_CONTRACT = {
   HIGH: "HIGH",
   OK: "OK",
+} as const;
+
+const FACE_SERVICE_QUALITY_ACTION = {
+  OK: "OK",
+  NEEDS_REVIEW: "NEEDS_REVIEW",
+} as const;
+
+type FaceServiceQualityAction =
+  (typeof FACE_SERVICE_QUALITY_ACTION)[keyof typeof FACE_SERVICE_QUALITY_ACTION];
+
+const FACE_SERVICE_CONFIDENCE = {
+  HIGH: "high",
+  LOW: "low",
+} as const;
+
+type FaceServiceConfidence =
+  (typeof FACE_SERVICE_CONFIDENCE)[keyof typeof FACE_SERVICE_CONFIDENCE];
+
+const FACE_SERVICE_QUALITY_REASON = {
+  OK: "ok",
+  NO_FACE: "no_face",
+  FACE_RESOLUTION_TOO_SMALL: "face_resolution_too_small",
+  BLURRY: "blurry",
+  ERROR: "error",
+} as const;
+
+const FACE_SERVICE_QUALITY_SIDE = {
+  DOCUMENT: "document",
+  SELFIE: "selfie",
+} as const;
+
+type FaceServiceQualitySide =
+  (typeof FACE_SERVICE_QUALITY_SIDE)[keyof typeof FACE_SERVICE_QUALITY_SIDE];
+type FaceServiceQualityReason =
+  (typeof FACE_SERVICE_QUALITY_REASON)[keyof typeof FACE_SERVICE_QUALITY_REASON];
+type FaceServiceQualityFailureReason = Exclude<
+  FaceServiceQualityReason,
+  (typeof FACE_SERVICE_QUALITY_REASON)["OK"]
+>;
+
+const FACE_SERVICE_QUALITY_FAILURE_CODE = {
+  document: {
+    [FACE_SERVICE_QUALITY_REASON.NO_FACE]: FACE_CAPTURE_FAILURE_CODE.QUALITY_DOCUMENT_NO_FACE,
+    [FACE_SERVICE_QUALITY_REASON.FACE_RESOLUTION_TOO_SMALL]:
+      FACE_CAPTURE_FAILURE_CODE.QUALITY_DOCUMENT_FACE_RESOLUTION_TOO_SMALL,
+    [FACE_SERVICE_QUALITY_REASON.BLURRY]: FACE_CAPTURE_FAILURE_CODE.QUALITY_DOCUMENT_BLURRY,
+    [FACE_SERVICE_QUALITY_REASON.ERROR]: FACE_CAPTURE_FAILURE_CODE.QUALITY_DOCUMENT_ERROR,
+  },
+  selfie: {
+    [FACE_SERVICE_QUALITY_REASON.NO_FACE]: FACE_CAPTURE_FAILURE_CODE.QUALITY_SELFIE_NO_FACE,
+    [FACE_SERVICE_QUALITY_REASON.FACE_RESOLUTION_TOO_SMALL]:
+      FACE_CAPTURE_FAILURE_CODE.QUALITY_SELFIE_FACE_RESOLUTION_TOO_SMALL,
+    [FACE_SERVICE_QUALITY_REASON.BLURRY]: FACE_CAPTURE_FAILURE_CODE.QUALITY_SELFIE_BLURRY,
+    [FACE_SERVICE_QUALITY_REASON.ERROR]: FACE_CAPTURE_FAILURE_CODE.QUALITY_SELFIE_ERROR,
+  },
 } as const;
 
 const FACE_SERVICE_METRIC_RANGE = {
@@ -82,6 +150,8 @@ export interface FaceServiceProviderConfiguration {
     | "faceServiceTimeoutMs"
     | "faceApiKey"
   >;
+  // The local euclidean-distance and Human detector-confidence settings are
+  // intentionally absent from this remote provider contract.
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,7 +192,22 @@ function parseQualityItem(value: unknown): FaceServiceQualityItem | null {
   if (faceWidth === undefined || laplacianVariance === undefined) {
     return null;
   }
-  if (typeof quality !== "string" || typeof reason !== "string" || typeof action !== "string") {
+  if (
+    (quality !== FACE_SERVICE_QUALITY.HIGH && quality !== FACE_SERVICE_QUALITY.LOW) ||
+    !isFaceServiceQualityReason(reason) ||
+    (action !== FACE_SERVICE_QUALITY_ACTION.OK &&
+      action !== FACE_SERVICE_QUALITY_ACTION.NEEDS_REVIEW)
+  ) {
+    return null;
+  }
+  if (
+    (quality === FACE_SERVICE_QUALITY.HIGH &&
+      (reason !== FACE_SERVICE_QUALITY_REASON.OK ||
+        action !== FACE_SERVICE_QUALITY_ACTION.OK)) ||
+    (quality === FACE_SERVICE_QUALITY.LOW &&
+      (reason === FACE_SERVICE_QUALITY_REASON.OK ||
+        action !== FACE_SERVICE_QUALITY_ACTION.NEEDS_REVIEW))
+  ) {
     return null;
   }
 
@@ -133,6 +218,41 @@ function parseQualityItem(value: unknown): FaceServiceQualityItem | null {
     laplacian_variance: laplacianVariance,
     action,
   };
+}
+
+function isFaceServiceQualityReason(value: unknown): value is FaceServiceQualityReason {
+  return (
+    value === FACE_SERVICE_QUALITY_REASON.OK ||
+    value === FACE_SERVICE_QUALITY_REASON.NO_FACE ||
+    value === FACE_SERVICE_QUALITY_REASON.FACE_RESOLUTION_TOO_SMALL ||
+    value === FACE_SERVICE_QUALITY_REASON.BLURRY ||
+    value === FACE_SERVICE_QUALITY_REASON.ERROR
+  );
+}
+
+function isFaceServiceCompareAction(value: unknown): value is FaceServiceCompareAction {
+  return (
+    value === FACE_SERVICE_COMPARE_ACTION.MATCHED ||
+    value === FACE_SERVICE_COMPARE_ACTION.NO_MATCH ||
+    value === FACE_SERVICE_COMPARE_ACTION.NEEDS_REVIEW
+  );
+}
+
+function isFaceServiceConfidence(value: unknown): value is FaceServiceConfidence {
+  return (
+    value === FACE_SERVICE_CONFIDENCE.HIGH || value === FACE_SERVICE_CONFIDENCE.LOW
+  );
+}
+
+function qualityFailureCode(
+  side: FaceServiceQualitySide,
+  reason: FaceServiceQualityReason,
+): FaceCaptureFailureCode | null {
+  if (reason === FACE_SERVICE_QUALITY_REASON.OK) {
+    return null;
+  }
+
+  return FACE_SERVICE_QUALITY_FAILURE_CODE[side][reason as FaceServiceQualityFailureReason];
 }
 
 function parseQualityResponse(value: unknown): FaceServiceQualityResponse | null {
@@ -170,33 +290,59 @@ function parseCompareResponse(value: unknown): FaceServiceCompareResponse | null
   ) {
     return null;
   }
-  if (confidence !== null && typeof confidence !== "string") {
+  if (confidence !== null && !isFaceServiceConfidence(confidence)) {
     return null;
   }
   if (
-    typeof quality_document !== "string" ||
-    typeof quality_selfie !== "string" ||
-    typeof action !== "string"
+    (quality_document !== FACE_SERVICE_QUALITY.HIGH &&
+      quality_document !== FACE_SERVICE_QUALITY.LOW) ||
+    (quality_selfie !== FACE_SERVICE_QUALITY.HIGH &&
+      quality_selfie !== FACE_SERVICE_QUALITY.LOW) ||
+    !isFaceServiceCompareAction(action)
   ) {
     return null;
   }
   if (!isRecord(reasons)) {
     return null;
   }
+  const reasonKeys = Object.keys(reasons);
+  if (
+    reasonKeys.length !== 2 ||
+    !reasonKeys.includes(FACE_SERVICE_QUALITY_SIDE.DOCUMENT) ||
+    !reasonKeys.includes(FACE_SERVICE_QUALITY_SIDE.SELFIE)
+  ) {
+    return null;
+  }
   for (const reason of Object.values(reasons)) {
-    if (typeof reason !== "string") {
+    if (!isFaceServiceQualityReason(reason)) {
       return null;
     }
+  }
+  const hasUsableQualityReasons =
+    reasons[FACE_SERVICE_QUALITY_SIDE.DOCUMENT] === FACE_SERVICE_QUALITY_REASON.OK &&
+    reasons[FACE_SERVICE_QUALITY_SIDE.SELFIE] === FACE_SERVICE_QUALITY_REASON.OK;
+  if (action !== FACE_SERVICE_COMPARE_ACTION.NEEDS_REVIEW) {
+    if (
+      quality_document !== FACE_SERVICE_QUALITY.HIGH ||
+      quality_selfie !== FACE_SERVICE_QUALITY.HIGH ||
+      parsedSimilarity === null ||
+      confidence === null ||
+      !hasUsableQualityReasons
+    ) {
+      return null;
+    }
+  } else if (parsedSimilarity !== null || confidence !== null || match) {
+    return null;
   }
 
   return {
     match,
     similarity: parsedSimilarity,
-    confidence: confidence as string | null,
+    confidence,
     quality_document,
     quality_selfie,
     action,
-    reasons: reasons as Record<string, string>,
+    reasons: reasons as Record<FaceServiceQualitySide, FaceServiceQualityReason>,
   };
 }
 
@@ -233,16 +379,35 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
     const quality = await this.post(FACE_SERVICE_QUALITY_PATH, request, parseQualityResponse);
     if (
       quality.document.quality !== FACE_SERVICE_QUALITY_CONTRACT.HIGH ||
+      quality.document.action !== FACE_SERVICE_QUALITY_CONTRACT.OK
+    ) {
+      throw new FaceCaptureError(
+        qualityFailureCode(FACE_SERVICE_QUALITY_SIDE.DOCUMENT, quality.document.reason) ??
+          FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
+      );
+    }
+    if (
       quality.selfie.quality !== FACE_SERVICE_QUALITY_CONTRACT.HIGH ||
-      quality.document.action !== FACE_SERVICE_QUALITY_CONTRACT.OK ||
       quality.selfie.action !== FACE_SERVICE_QUALITY_CONTRACT.OK
     ) {
-      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW);
+      throw new FaceCaptureError(
+        qualityFailureCode(FACE_SERVICE_QUALITY_SIDE.SELFIE, quality.selfie.reason) ??
+          FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
+      );
     }
 
     const compare = await this.post(FACE_SERVICE_COMPARE_PATH, request, parseCompareResponse);
-    if (compare.quality_document !== "HIGH" || compare.quality_selfie !== "HIGH") {
-      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW);
+    if (compare.quality_document !== FACE_SERVICE_QUALITY_CONTRACT.HIGH) {
+      throw new FaceCaptureError(
+        qualityFailureCode(FACE_SERVICE_QUALITY_SIDE.DOCUMENT, compare.reasons.document) ??
+          FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW,
+      );
+    }
+    if (compare.quality_selfie !== FACE_SERVICE_QUALITY_CONTRACT.HIGH) {
+      throw new FaceCaptureError(
+        qualityFailureCode(FACE_SERVICE_QUALITY_SIDE.SELFIE, compare.reasons.selfie) ??
+          FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW,
+      );
     }
     if (compare.action === FACE_SERVICE_COMPARE_ACTION.NEEDS_REVIEW) {
       if (compare.match || compare.similarity !== null) {

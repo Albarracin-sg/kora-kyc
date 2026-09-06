@@ -1,10 +1,13 @@
 import {
+  getFaceMatchPresentation,
   KYC_STATUS,
   formatFaceSimilarity,
   getCedulaVerdictPresentation,
   getKycStatusPresentation,
 } from "./kyc-status";
 import {
+  KYC_FACE_CAPTURE_FAILURE,
+  KYC_FACE_COMPARISON_REASON,
   DOCUMENT_CHECK_RESULT,
   KYC_PROCESSING_FAILURE,
 } from "../types/api";
@@ -29,6 +32,29 @@ describe("getKycStatusPresentation", () => {
       description:
         "La verificación documental está temporalmente no disponible. Puede intentarlo más tarde.",
       tone: "danger",
+    });
+  });
+
+  it("explains a document quality failure with a recovery action", () => {
+    expect(
+      getKycStatusPresentation(
+        KYC_STATUS.NEEDS_REVIEW,
+        KYC_FACE_CAPTURE_FAILURE.QUALITY_DOCUMENT_BLURRY,
+      ),
+    ).toEqual({
+      label: "Necesitamos una nueva foto",
+      description:
+        "La imagen del documento está borrosa. Tome una nueva foto sin movimiento y con buena iluminación.",
+      tone: "review",
+    });
+  });
+
+  it("keeps unknown review reasons on the generic safe copy", () => {
+    expect(getKycStatusPresentation(KYC_STATUS.NEEDS_REVIEW, "UNSAFE_PROVIDER_REASON")).toEqual({
+      label: "La captura requiere revisión",
+      description:
+        "Kora no pudo completar con seguridad una decisión automatizada a partir de estas imágenes.",
+      tone: "review",
     });
   });
 });
@@ -83,5 +109,54 @@ describe("getCedulaVerdictPresentation", () => {
       label: "Sin datos de cédula",
       tone: "neutral",
     });
+  });
+});
+
+describe("getFaceMatchPresentation", () => {
+  it("describes an approved facial comparison", () => {
+    expect(
+      getFaceMatchPresentation(
+        KYC_STATUS.APPROVED,
+        KYC_FACE_COMPARISON_REASON.APPROVED,
+        0.92,
+      ),
+    ).toEqual({
+      description: "La coincidencia facial es suficiente para aprobar la verificación.",
+      tone: "success",
+    });
+  });
+
+  it("describes a rejected comparison without hiding its numeric similarity", () => {
+    expect(
+      getFaceMatchPresentation(
+        KYC_STATUS.REJECTED,
+        KYC_FACE_COMPARISON_REASON.BELOW_THRESHOLD,
+        0.41,
+      ),
+    ).toEqual({
+      description:
+        "La coincidencia facial está por debajo del umbral requerido. La verificación no fue aprobada.",
+      tone: "danger",
+    });
+  });
+
+  it("returns no facial presentation for an invalid comparison", () => {
+    expect(
+      getFaceMatchPresentation(
+        KYC_STATUS.NEEDS_REVIEW,
+        "FACE_CAPTURE_INVALID_RESPONSE",
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it("returns no facial presentation for an invalid comparison with a numeric similarity", () => {
+    expect(
+      getFaceMatchPresentation(
+        KYC_STATUS.NEEDS_REVIEW,
+        "FACE_CAPTURE_INVALID_RESPONSE",
+        0.91,
+      ),
+    ).toBeNull();
   });
 });

@@ -4,6 +4,7 @@ No model weights, no heavy dependencies (opencv/numpy tests are gated
 behind importorskip).
 """
 import base64
+import math
 
 import pytest
 
@@ -82,6 +83,15 @@ def test_missing_variance_fails_closed():
     # degradation).
     v = evaluate_face_quality(
         face_detected=True, face_width_px=150.0, laplacian_variance=None
+    )
+    assert v["quality"] == "LOW"
+    assert v["reason"] == "blurry"
+
+
+@pytest.mark.parametrize("variance", [math.nan, math.inf, -math.inf])
+def test_non_finite_variance_fails_closed(variance):
+    v = evaluate_face_quality(
+        face_detected=True, face_width_px=150.0, laplacian_variance=variance
     )
     assert v["quality"] == "LOW"
     assert v["reason"] == "blurry"

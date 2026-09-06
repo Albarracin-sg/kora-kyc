@@ -11,6 +11,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 from app.config import get_settings
 from app.main import app
+from app.schemas import MAX_BASE64_IMAGE_CHARS
 
 PROTECTED_ENDPOINTS = ("/face/quality", "/face/compare")
 PUBLIC_DOCUMENTATION_ENDPOINTS = ("/docs", "/redoc", "/openapi.json")
@@ -25,8 +26,13 @@ def _reset_settings_cache(monkeypatch):
     get_settings.cache_clear()
 
 
-def _request(client: TestClient, endpoint: str, headers: dict[str, str] | None = None):
-    return client.post(endpoint, json=PAYLOAD, headers=headers)
+def _request(
+    client: TestClient,
+    endpoint: str,
+    headers: dict[str, str] | None = None,
+    payload: object = PAYLOAD,
+):
+    return client.post(endpoint, json=payload, headers=headers)
 
 
 def test_health_never_requires_api_key(monkeypatch):
@@ -80,3 +86,48 @@ def test_blank_api_key_fails_safely(monkeypatch):
 
     response = _request(TestClient(app), "/face/quality")
     assert response.status_code == 503
+
+
+@pytest.mark.parametrize("endpoint", PROTECTED_ENDPOINTS)
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "document_face": "c2Vuc2l0aXZlLWJhc2U2NC1tYXJrZXI="
+            + "A" * MAX_BASE64_IMAGE_CHARS,
+            "selfie": "x",
+        },
+        {
+            "document_face": ["c2Vuc2l0aXZlLXBpaS1tYXJrZXI="],
+            "selfie": "x",
+        },
+    ],
+    ids=["overlong-base64", "malformed-field"],
+)
+def test_validation_errors_are_generic_and_never_echo_payload(monkeypatch, endpoint, payload):
+    monkeypatch.setenv("FACE_API_KEY", "test-face-api-key")
+
+    response = _request(
+        TestClient(app),
+        endpoint,
+        headers={"X-API-Key": "test-face-api-key"},
+        payload=payload,
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "invalid request payload"}
+    assert "c2Vuc2l0aXZl" not in response.text
+
+
+@pytest.mark.parametrize("endpoint", PROTECTED_ENDPOINTS)
+def test_invalid_api_key_still_returns_401_for_invalid_payload(monkeypatch, endpoint):
+    monkeypatch.setenv("FACE_API_KEY", "test-face-api-key")
+
+    response = _request(
+        TestClient(app),
+        endpoint,
+        headers={"X-API-Key": "invalid-test-key"},
+        payload={"document_face": ["c2Vuc2l0aXZlLXBpaS1tYXJrZXI="], "selfie": "x"},
+    )
+
+    assert response.status_code == 401

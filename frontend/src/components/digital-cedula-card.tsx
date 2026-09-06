@@ -2,24 +2,32 @@ import { type ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { KycMediaImage } from "./kyc-media-image";
 import { getDocumentImages, getSelfieImage } from "../services/kyc-flow";
-import { formatFaceSimilarity } from "../services/kyc-status";
-import { DOCUMENT_SIDE, type KycImageMetadata } from "../types/api";
+import {
+  formatFaceSimilarity,
+  getFaceMatchPresentation,
+} from "../services/kyc-status";
+import { DOCUMENT_SIDE, type KycImageMetadata, type KycStatus } from "../types/api";
 import { COLORS, FONT, RADIUS, SPACING } from "../theme/theme";
 
 interface DigitalCedulaCardProps {
   images: KycImageMetadata[];
   faceSimilarity: number | null;
   statusLabel: string;
+  status?: KycStatus;
+  reasonCode?: string | null;
 }
 
 export function DigitalCedulaCard({
   images,
   faceSimilarity,
   statusLabel,
+  status,
+  reasonCode,
 }: DigitalCedulaCardProps): ReactNode {
   const documentImages = getDocumentImages(images);
   const selfieImage = getSelfieImage(images);
-  const similarity = formatFaceSimilarity(faceSimilarity);
+  const faceMatchPresentation = getFaceMatchPresentation(status, reasonCode, faceSimilarity);
+  const similarity = faceMatchPresentation ? formatFaceSimilarity(faceSimilarity) : null;
 
   return (
     <View style={styles.card} accessibilityLabel="Cédula digital">
@@ -49,9 +57,23 @@ export function DigitalCedulaCard({
       </View>
 
       {similarity !== null ? (
-        <View style={styles.similarityRow}>
-          <Text style={styles.similarityLabel}>Coincidencia facial</Text>
-          <Text style={styles.similarityValue}>{similarity}</Text>
+        <View
+          style={styles.similaritySection}
+          accessibilityLabel={`Coincidencia facial: ${similarity}`}
+        >
+          <View style={styles.similarityRow}>
+            <Text style={styles.similarityLabel}>Coincidencia facial: {similarity}</Text>
+          </View>
+          {faceMatchPresentation ? (
+            <Text
+              style={[
+                styles.similarityDescription,
+                { color: VERDICT_TONE_COLOR[faceMatchPresentation.tone] },
+              ]}
+            >
+              {faceMatchPresentation.description}
+            </Text>
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -69,6 +91,14 @@ function documentSideLabel(side: KycImageMetadata["side"]): string {
 
   return "Fotografía del documento";
 }
+
+const VERDICT_TONE_COLOR = {
+  neutral: COLORS.muted,
+  pending: COLORS.mint,
+  success: COLORS.mint,
+  danger: COLORS.coral,
+  review: COLORS.amber,
+} as const;
 
 const styles = StyleSheet.create({
   card: {
@@ -120,9 +150,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.panelRaised,
   },
   similarityRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     borderTopWidth: 1,
     borderTopColor: COLORS.line,
     paddingTop: SPACING.sm,
@@ -132,9 +159,12 @@ const styles = StyleSheet.create({
     fontFamily: FONT.body,
     fontSize: 14,
   },
-  similarityValue: {
-    color: COLORS.mint,
-    fontFamily: FONT.label,
-    fontSize: 20,
+  similaritySection: {
+    gap: SPACING.xs,
+  },
+  similarityDescription: {
+    fontFamily: FONT.body,
+    fontSize: 13,
+    lineHeight: 19,
   },
 });

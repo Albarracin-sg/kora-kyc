@@ -148,6 +148,7 @@ function createWorker(
   const configService = {
     values: {
       ocrMinimumConfidence: 0.8,
+      faceMinimumSimilarity: 0.72,
       documentProvider: options.documentProvider ?? KYC_DOCUMENT_PROVIDER.LOCAL,
       faceVerificationProvider:
         options.faceVerificationProvider ?? FACE_VERIFICATION_PROVIDER.LOCAL,
@@ -628,6 +629,35 @@ describe("KycProcessingWorker document profile persistence", () => {
           rejectionCode: "FACE_SIMILARITY_BELOW_THRESHOLD",
           faceDistance: 0.8,
           faceSimilarity: 0.05,
+        }),
+      }),
+    );
+  });
+
+  it("fails closed without persisting a similarity for an inconsistent face result", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const faceVerify = jest.fn().mockResolvedValue({
+      documentFaceCount: 1,
+      selfieFaceCount: 1,
+      distance: 0.1,
+      similarity: 0.9,
+      accepted: false,
+    });
+    const { worker, transaction } = createWorker(
+      fileStorage,
+      jest.fn().mockResolvedValue(VALID_EXTRACTION),
+      { images: FULL_COVERAGE_IMAGES, faceVerify },
+    );
+
+    await worker["processJob"](createJob());
+
+    expect(transaction.kycVerification.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: KYC_STATUS.NEEDS_REVIEW,
+          rejectionCode: "FACE_CAPTURE_INVALID_RESPONSE",
+          faceDistance: null,
+          faceSimilarity: null,
         }),
       }),
     );

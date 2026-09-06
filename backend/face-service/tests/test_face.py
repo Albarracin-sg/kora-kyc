@@ -8,6 +8,8 @@ import math
 import pytest
 
 from app.face_service import (
+    IMAGE_KIND,
+    assess_image_with_orientation,
     cosine_similarity,
     face_width_px,
     finalize_compare,
@@ -40,6 +42,22 @@ class ExplodingEmbeddingFace:
         raise AssertionError("embedding must not be read when quality is LOW")
 
 
+class OrientedImage:
+    def __init__(self, orientation_degrees):
+        self.orientation_degrees = orientation_degrees
+
+
+class OrientationModel:
+    def __init__(self, faces_by_orientation):
+        self.faces_by_orientation = faces_by_orientation
+        self.seen_orientations = []
+
+    def get(self, image):
+        orientation = getattr(image, "orientation_degrees", 0)
+        self.seen_orientations.append(orientation)
+        return self.faces_by_orientation.get(orientation, [])
+
+
 def _verdict(quality, reason):
     return {
         "quality": quality,
@@ -48,6 +66,131 @@ def _verdict(quality, reason):
         "laplacian_variance": 120.0,
         "action": "OK" if quality == "HIGH" else "NEEDS_REVIEW",
     }
+
+
+def _patch_orientation_dependencies(monkeypatch):
+    def fake_rotate(image, orientation_degrees):
+        if orientation_degrees == 0:
+            return image
+        return OrientedImage(orientation_degrees)
+
+    monkeypatch.setattr("app.face_service.rotate_image", fake_rotate)
+    monkeypatch.setattr(
+        "app.face_service.compute_laplacian_variance", lambda _image: 120.0
+    )
+
+
+def test_document_quality_selects_the_orientation_that_passes_the_conservative_floor(
+    monkeypatch,
+):
+    _patch_orientation_dependencies(monkeypatch)
+    model = OrientationModel(
+        {
+            0: [FakeFace(det_score=0.99, bbox=(0, 0, 70, 70), embedding=[0.0, 1.0])],
+            90: [FakeFace(det_score=0.8, bbox=(0, 0, 95, 95), embedding=[1.0, 0.0])],
+        }
+    )
+
+    assessment = assess_image_with_orientation(
+        model,
+        object(),
+        blur_threshold=25.0,
+        min_face_width_px=90,
+        image_kind=IMAGE_KIND["DOCUMENT"],
+    )
+
+    assert assessment.orientation_degrees == 90
+    assert assessment.verdict["quality"] == "HIGH"
+    assert assessment.verdict["action"] == "OK"
+    assert assessment.face is model.faces_by_orientation[90][0]
+
+
+def test_selfie_is_evaluated_only_in_the_normal_orientation(monkeypatch):
+    _patch_orientation_dependencies(monkeypatch)
+    model = OrientationModel({0: [FakeFace(embedding=[1.0, 0.0])]})
+
+    assessment = assess_image_with_orientation(
+        model,
+        object(),
+        blur_threshold=25.0,
+        min_face_width_px=100,
+        image_kind=IMAGE_KIND["SELFIE"],
+    )
+
+    assert assessment.orientation_degrees == 0
+    assert model.seen_orientations == [0]
+
+
+@pytest.mark.parametrize(
+    ("faces_by_orientation", "variance", "reason"),
+    [
+        ({}, 120.0, "no_face"),
+        ({0: [FakeFace(embedding=[1.0, 0.0])]}, 12.0, "blurry"),
+    ],
+)
+def test_document_no_face_and_blur_remain_low(
+    monkeypatch, faces_by_orientation, variance, reason
+):
+    _patch_orientation_dependencies(monkeypatch)
+    monkeypatch.setattr("app.face_service.compute_laplacian_variance", lambda _image: variance)
+    assessment = assess_image_with_orientation(
+        OrientationModel(faces_by_orientation),
+        object(),
+        blur_threshold=25.0,
+        min_face_width_px=90,
+        image_kind=IMAGE_KIND["DOCUMENT"],
+    )
+
+    assert assessment.verdict["quality"] == "LOW"
+    assert assessment.verdict["action"] == "NEEDS_REVIEW"
+    assert assessment.verdict["reason"] == reason
+
+
+def test_compare_uses_the_same_document_orientation_that_quality_selected(monkeypatch):
+    _patch_orientation_dependencies(monkeypatch)
+    model = OrientationModel(
+        {
+            0: [FakeFace(det_score=0.99, bbox=(0, 0, 70, 70), embedding=[0.0, 1.0])],
+            90: [FakeFace(det_score=0.8, bbox=(0, 0, 95, 95), embedding=[1.0, 0.0])],
+        }
+    )
+    image = object()
+
+    quality_assessment = assess_image_with_orientation(
+        model,
+        image,
+        blur_threshold=25.0,
+        min_face_width_px=90,
+        image_kind=IMAGE_KIND["DOCUMENT"],
+    )
+    compare_assessment = assess_image_with_orientation(
+        model,
+        image,
+        blur_threshold=25.0,
+        min_face_width_px=90,
+        image_kind=IMAGE_KIND["DOCUMENT"],
+    )
+    selfie_assessment = assess_image_with_orientation(
+        OrientationModel({0: [FakeFace(embedding=[1.0, 0.0])]}),
+        object(),
+        blur_threshold=25.0,
+        min_face_width_px=100,
+        image_kind=IMAGE_KIND["SELFIE"],
+    )
+
+    result = finalize_compare(
+        document_quality=quality_assessment.verdict,
+        selfie_quality=selfie_assessment.verdict,
+        document_face=compare_assessment.face,
+        selfie_face=selfie_assessment.face,
+        match_threshold=0.72,
+    )
+
+    assert quality_assessment.orientation_degrees == 90
+    assert compare_assessment.orientation_degrees == 90
+    assert result["similarity"] == pytest.approx(1.0)
+    assert result["match"] is True
+    assert result["action"] == "MATCHED"
 
 
 # --- cosine_similarity ---
