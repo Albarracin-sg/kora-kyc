@@ -36,13 +36,13 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 const KORA_NAVIGATION_THEME: Theme = {
-  dark: true,
+  dark: false,
   colors: {
     primary: COLORS.mint,
-    background: COLORS.ink,
-    card: COLORS.ink,
-    text: COLORS.cream,
-    border: COLORS.ink,
+    background: COLORS.cream,
+    card: COLORS.cream,
+    text: COLORS.ink,
+    border: COLORS.line,
     notification: COLORS.coral,
   },
   fonts: {
@@ -128,8 +128,8 @@ export default function App(): ReactNode {
 function SystemBars(): ReactNode {
   return (
     <>
-      <StatusBar style="light" />
-      <NavigationBar style="dark" />
+      <StatusBar style="dark" />
+      <NavigationBar style="light" />
     </>
   );
 }
@@ -137,6 +137,6 @@ function SystemBars(): ReactNode {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: COLORS.ink,
+    backgroundColor: COLORS.cream,
   },
 });

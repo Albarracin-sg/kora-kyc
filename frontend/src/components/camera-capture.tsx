@@ -386,19 +386,19 @@ const styles = StyleSheet.create({
     gap: SPACING.xs,
   },
   step: {
-    color: COLORS.mint,
+    color: COLORS.mintDark,
     fontFamily: FONT.label,
     fontSize: 11,
     letterSpacing: 1.3,
   },
   title: {
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.display,
     fontSize: 31,
     lineHeight: 36,
   },
   instruction: {
-    color: COLORS.muted,
+    color: COLORS.ink,
     fontFamily: FONT.body,
     fontSize: 15,
     lineHeight: 21,
@@ -440,10 +440,16 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.pill,
   },
   cameraStatus: {
+    backgroundColor: COLORS.panel,
+    borderColor: COLORS.line,
+    borderRadius: RADIUS.sm,
+    borderWidth: 1,
     minHeight: 24,
     flexDirection: "row",
     alignItems: "center",
     gap: SPACING.xs,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
   },
   cameraReadyCopy: {
     color: COLORS.mint,
@@ -461,13 +467,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   detail: {
-    color: COLORS.amber,
+    color: COLORS.muted,
     fontFamily: FONT.body,
     fontSize: 14,
     lineHeight: 20,
   },
   actions: {
+    backgroundColor: COLORS.ink,
+    borderRadius: RADIUS.lg,
     gap: SPACING.xs,
+    padding: SPACING.sm,
   },
   error: {
     color: COLORS.coral,
@@ -480,13 +489,13 @@ const styles = StyleSheet.create({
     gap: SPACING.md,
   },
   permissionTitle: {
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.display,
     fontSize: 34,
     lineHeight: 39,
   },
   permissionCopy: {
-    color: COLORS.muted,
+    color: COLORS.ink,
     fontFamily: FONT.body,
     fontSize: 16,
     lineHeight: 24,

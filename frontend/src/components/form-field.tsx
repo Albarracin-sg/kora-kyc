@@ -60,7 +60,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.line,
     backgroundColor: COLORS.panel,
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.body,
     fontSize: 16,
     paddingHorizontal: SPACING.md,

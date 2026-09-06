@@ -5,10 +5,11 @@ import { COLORS, SPACING } from "../theme/theme";
 
 interface ScreenShellProps {
   children: ReactNode;
+  footer?: ReactNode;
   scroll?: boolean;
 }
 
-export function ScreenShell({ children, scroll = true }: ScreenShellProps): ReactNode {
+export function ScreenShell({ children, footer, scroll = true }: ScreenShellProps): ReactNode {
   const entranceProgress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -29,8 +30,8 @@ export function ScreenShell({ children, scroll = true }: ScreenShellProps): Reac
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "right", "bottom", "left"]}>
-      <View pointerEvents="none" style={styles.orbMint} />
-      <View pointerEvents="none" style={styles.orbAmber} />
+      <View pointerEvents="none" style={styles.paperGlow} />
+      <View pointerEvents="none" style={styles.paperAccent} />
       <Animated.View
         style={[
           styles.contentMotion,
@@ -39,17 +40,18 @@ export function ScreenShell({ children, scroll = true }: ScreenShellProps): Reac
             transform: [{ translateY: entranceProgress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
           },
         ]}
-      >
-        {content}
-      </Animated.View>
-    </SafeAreaView>
+        >
+          {content}
+        </Animated.View>
+        {footer}
+      </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.ink,
+    backgroundColor: COLORS.cream,
     overflow: "hidden",
   },
   contentMotion: {
@@ -65,7 +67,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.lg,
   },
-  orbMint: {
+  paperGlow: {
     position: "absolute",
     width: 280,
     height: 280,
@@ -73,16 +75,16 @@ const styles = StyleSheet.create({
     right: -100,
     borderRadius: 140,
     backgroundColor: COLORS.botanicalGlow,
-    opacity: 0.5,
+    opacity: 0.8,
   },
-  orbAmber: {
+  paperAccent: {
     position: "absolute",
     width: 190,
     height: 190,
     bottom: -85,
     left: -90,
     borderRadius: 95,
-    backgroundColor: COLORS.amberSurface,
-    opacity: 0.35,
+    backgroundColor: COLORS.amber,
+    opacity: 0.22,
   },
 });

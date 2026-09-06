@@ -71,16 +71,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     justifyContent: "center",
     paddingHorizontal: SPACING.md,
-    backgroundColor: COLORS.panel,
-    borderColor: COLORS.line,
+     backgroundColor: COLORS.panel,
+     borderColor: COLORS.ink,
   },
   primary: {
-    backgroundColor: COLORS.mint,
-    borderColor: COLORS.mint,
+     backgroundColor: COLORS.ink,
+     borderColor: COLORS.ink,
   },
   danger: {
-    backgroundColor: COLORS.coral,
-    borderColor: COLORS.coral,
+     backgroundColor: COLORS.coral,
+     borderColor: COLORS.coral,
   },
   ghost: {
     backgroundColor: COLORS.transparent,
@@ -98,18 +98,18 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   label: {
-    color: COLORS.cream,
+     color: COLORS.ink,
     fontFamily: FONT.button,
     fontSize: 16,
   },
   primaryLabel: {
-    color: COLORS.ink,
+     color: COLORS.cream,
   },
   ghostLabel: {
-    color: COLORS.muted,
+     color: COLORS.ink,
   },
   arrow: {
-    color: COLORS.ink,
+     color: COLORS.cream,
     fontFamily: FONT.label,
     fontSize: 20,
   },

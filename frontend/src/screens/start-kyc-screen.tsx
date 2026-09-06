@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   title: {
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.display,
     fontSize: 38,
     lineHeight: 43,
@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
   },
   stepText: {
     flex: 1,
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.body,
     fontSize: 15,
     lineHeight: 21,

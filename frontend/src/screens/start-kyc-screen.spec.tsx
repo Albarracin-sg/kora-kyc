@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { StartKycScreen } from "./start-kyc-screen";
 import { useKyc } from "../contexts/kyc-context";
 import { APP_ROUTE, type AppScreenProps } from "../navigation/routes";
+import { COLORS } from "../theme/theme";
 import { REMOTE_BIOMETRIC_CONSENT_VERSION } from "../types/api";
 
 jest.mock("../components/screen-shell", () => ({
@@ -105,5 +106,25 @@ describe("StartKycScreen remote consent", () => {
         disabled: false,
       }),
     );
+  });
+
+  it("uses ink text on the light shell and step surfaces", async () => {
+    mockedUseKyc.mockReturnValue({
+      getConsentRequirements: jest.fn().mockResolvedValue({
+        requiresExternalProcessing: false,
+        consentVersion: null,
+      }),
+      isHydrated: true,
+      start: jest.fn(),
+    } as never);
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(screen.getByText("Prepare sus fotografías.")).toHaveStyle({ color: COLORS.ink }),
+    );
+    expect(screen.getByText("Use la cámara trasera para capturar el frente de su cédula.")).toHaveStyle({
+      color: COLORS.ink,
+    });
   });
 });

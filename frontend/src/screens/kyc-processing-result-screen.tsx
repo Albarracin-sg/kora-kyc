@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 import { DigitalCedulaCard } from "../components/digital-cedula-card";
+import { BackToHomeButton } from "../components/back-to-home-button";
 import { KycStepIndicator } from "../components/kyc-step-indicator";
 import { PrimaryButton, BUTTON_VARIANT } from "../components/primary-button";
 import { ScreenShell } from "../components/screen-shell";
@@ -93,7 +94,10 @@ export function KycProcessingResultScreen(
   return (
     <ScreenShell>
       <View style={styles.content}>
-         <Text style={styles.eyebrow}>VERIFICACIÓN DE IDENTIDAD / RESULTADO</Text>
+          <View style={styles.header}>
+            <Text style={styles.eyebrow}>VERIFICACIÓN DE IDENTIDAD / RESULTADO</Text>
+            <BackToHomeButton navigation={navigation} />
+          </View>
          <KycStepIndicator verification={verification} />
         <StatusBadge label={presentation.label} tone={presentation.tone} />
         <Text style={styles.title}>{presentation.label}</Text>
@@ -167,14 +171,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: SPACING.lg,
   },
+  header: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
   eyebrow: {
-    color: COLORS.mint,
+    color: COLORS.mintDark,
     fontFamily: FONT.label,
     fontSize: 12,
     letterSpacing: 1.5,
   },
   title: {
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.display,
     fontSize: 38,
     lineHeight: 43,

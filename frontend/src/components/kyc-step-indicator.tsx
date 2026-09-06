@@ -131,28 +131,15 @@ export function KycStepIndicator({ verification }: KycStepIndicatorProps): React
         >
           <View
             style={[
-              styles.circle,
+             styles.segment,
               stageState.status === KYC_STAGE_STATUS.COMPLETED
-                ? styles.circleCompleted
+                 ? styles.segmentCompleted
                 : stageState.status === KYC_STAGE_STATUS.CURRENT
-                  ? styles.circleCurrent
-                  : styles.circlePending,
+                   ? styles.segmentCurrent
+                   : styles.segmentPending,
             ]}
           >
-            {stageState.status === KYC_STAGE_STATUS.COMPLETED ? (
-              <Text style={styles.checkMark}>✓</Text>
-            ) : (
-              <Text
-                style={[
-                  styles.number,
-                  stageState.status === KYC_STAGE_STATUS.CURRENT
-                    ? styles.numberCurrent
-                    : styles.numberPending,
-                ]}
-              >
-                {index + 1}
-              </Text>
-            )}
+            <Text style={styles.number}>{index + 1}</Text>
           </View>
           <Text
             style={[
@@ -176,48 +163,37 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: SPACING.sm,
+   gap: SPACING.xs,
   },
   item: {
     flex: 1,
     alignItems: "center",
     gap: SPACING.xs,
   },
-  circle: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1.5,
+   segment: {
+     width: "100%",
+     height: 10,
+     borderRadius: RADIUS.pill,
+     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-  circleCompleted: {
+   segmentCompleted: {
     backgroundColor: COLORS.mint,
     borderColor: COLORS.mint,
   },
-  circleCurrent: {
-    backgroundColor: COLORS.successSurface,
-    borderColor: COLORS.mint,
+   segmentCurrent: {
+     backgroundColor: COLORS.amber,
+     borderColor: COLORS.amber,
   },
-  circlePending: {
-    backgroundColor: COLORS.panelRaised,
+   segmentPending: {
+     backgroundColor: COLORS.panelRaised,
     borderColor: COLORS.line,
   },
-  checkMark: {
-    color: COLORS.ink,
-    fontFamily: FONT.heavy,
-    fontSize: 16,
-    lineHeight: 18,
-  },
-  number: {
-    fontFamily: FONT.label,
-    fontSize: 13,
-  },
-  numberCurrent: {
-    color: COLORS.mint,
-  },
-  numberPending: {
-    color: COLORS.muted,
+   number: {
+     color: COLORS.ink,
+     fontFamily: FONT.button,
+     fontSize: 10,
   },
   label: {
     fontFamily: FONT.label,
@@ -225,12 +201,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   labelCompleted: {
-    color: COLORS.mint,
+    color: COLORS.ink,
   },
   labelCurrent: {
-    color: COLORS.cream,
+    color: COLORS.ink,
   },
   labelPending: {
-    color: COLORS.muted,
+    color: COLORS.ink,
   },
 });

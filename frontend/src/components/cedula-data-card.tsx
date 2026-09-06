@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   cardEyebrow: {
-    color: COLORS.amber,
+    color: COLORS.mintDark,
     fontFamily: FONT.label,
     fontSize: 10,
     letterSpacing: 1.2,
@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   fieldValue: {
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.label,
     fontSize: 14,
     flexShrink: 1,

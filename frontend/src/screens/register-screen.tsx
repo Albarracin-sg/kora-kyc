@@ -6,7 +6,7 @@ import { PrimaryButton, BUTTON_VARIANT } from "../components/primary-button";
 import { ScreenShell } from "../components/screen-shell";
 import { toUserFacingError, useAuth } from "../contexts/auth-context";
 import { APP_ROUTE, type AppScreenProps } from "../navigation/routes";
-import { COLORS, FONT, SPACING } from "../theme/theme";
+import { COLORS, FONT, RADIUS, SPACING } from "../theme/theme";
 
 export function RegisterScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.REGISTER>): ReactNode {
   const { register } = useAuth();
@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   title: {
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.display,
     fontSize: 38,
     lineHeight: 43,

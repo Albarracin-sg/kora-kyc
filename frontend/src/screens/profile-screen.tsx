@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { CedulaDataCard } from "../components/cedula-data-card";
+import { AuthenticatedScreenShell } from "../components/authenticated-screen-shell";
+import { BackToHomeButton } from "../components/back-to-home-button";
 import { PrimaryButton, BUTTON_VARIANT } from "../components/primary-button";
-import { ScreenShell } from "../components/screen-shell";
 import { StatusBadge } from "../components/status-badge";
 import { toUserFacingError, useAuth } from "../contexts/auth-context";
 import { useKyc } from "../contexts/kyc-context";
@@ -60,10 +61,15 @@ export function ProfileScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.PR
       };
 
   return (
-    <ScreenShell>
+    <AuthenticatedScreenShell activeRoute={APP_ROUTE.PROFILE} navigation={navigation}>
       <View style={styles.content}>
-         <Text style={styles.eyebrow}>PERFIL / CUENTA</Text>
-         <Text style={styles.title}>Su cuenta.</Text>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.eyebrow}>PERFIL / CUENTA</Text>
+            <Text style={styles.title}>Su cuenta.</Text>
+          </View>
+          <BackToHomeButton navigation={navigation} />
+        </View>
 
         <View style={styles.profileCard}>
            <Text style={styles.profileLabel}>CORREO ELECTRÓNICO</Text>
@@ -103,7 +109,7 @@ export function ProfileScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.PR
           />
         </View>
       </View>
-    </ScreenShell>
+    </AuthenticatedScreenShell>
   );
 }
 
@@ -112,6 +118,11 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: SPACING.md,
   },
+  header: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
   eyebrow: {
     color: COLORS.mint,
     fontFamily: FONT.label,
@@ -119,7 +130,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   title: {
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.display,
     fontSize: 38,
     lineHeight: 43,
@@ -146,7 +157,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
   },
   email: {
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.body,
     fontSize: 18,
   },

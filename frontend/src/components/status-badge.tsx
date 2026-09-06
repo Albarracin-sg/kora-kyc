@@ -9,17 +9,17 @@ interface StatusBadgeProps {
 }
 
 const TONE_STYLE = {
-  [KYC_STATUS_TONE.NEUTRAL]: { backgroundColor: COLORS.line, color: COLORS.cream },
-  [KYC_STATUS_TONE.PENDING]: { backgroundColor: COLORS.pendingSurface, color: COLORS.mint },
-  [KYC_STATUS_TONE.SUCCESS]: { backgroundColor: COLORS.successSurface, color: COLORS.mint },
+  [KYC_STATUS_TONE.NEUTRAL]: { backgroundColor: COLORS.ink, color: COLORS.cream },
+  [KYC_STATUS_TONE.PENDING]: { backgroundColor: COLORS.ink, color: COLORS.mint },
+  [KYC_STATUS_TONE.SUCCESS]: { backgroundColor: COLORS.ink, color: COLORS.mint },
   [KYC_STATUS_TONE.DANGER]: { backgroundColor: COLORS.coralSurface, color: COLORS.coral },
-  [KYC_STATUS_TONE.REVIEW]: { backgroundColor: COLORS.amberSurface, color: COLORS.amber },
+  [KYC_STATUS_TONE.REVIEW]: { backgroundColor: COLORS.ink, color: COLORS.amber },
 } as const;
 
 export function StatusBadge({ label, tone }: StatusBadgeProps): ReactNode {
   const toneStyle = TONE_STYLE[tone];
   return (
-    <View style={[styles.badge, { backgroundColor: toneStyle.backgroundColor }]}>
+    <View accessible accessibilityLabel={`Estado: ${label}`} style={[styles.badge, { backgroundColor: toneStyle.backgroundColor }]}>
       <View style={[styles.dot, { backgroundColor: toneStyle.color }]} />
       <Text style={[styles.label, { color: toneStyle.color }]}>{label}</Text>
     </View>
