@@ -84,7 +84,7 @@ services:
       - key: INSIGHTFACE_ROOT
         value: /opt/render/project/src/.insightface
       - key: FACE_MATCH_THRESHOLD
-        value: "0.40"
+        value: "0.72"
       - key: FACE_HIGH_CONFIDENCE_THRESHOLD
         value: "0.60"
       - key: FACE_BLUR_THRESHOLD

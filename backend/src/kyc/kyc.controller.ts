@@ -134,7 +134,7 @@ export class KycController {
 
     const normalized = sideQuery.trim().toUpperCase();
     if (!DOCUMENT_SIDE[normalized as keyof typeof DOCUMENT_SIDE]) {
-      throw new BadRequestException(`Invalid side '${sideQuery}'. Must be FRONT, BACK, or COMBINED`);
+      throw new BadRequestException("Invalid document side. Use FRONT, BACK, or COMBINED");
     }
 
     return normalized as DocumentSide;

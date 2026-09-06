@@ -197,10 +197,9 @@ def test_orthogonal_embeddings_no_match():
 
 
 def test_match_threshold_boundary():
-    # Default threshold is now 0.40 (calibrated on real doc-vs-selfie
-    # cosine 0.436): exactly 0.40 -> MATCH, just below -> NO_MATCH.
-    b_below = (0.39, math.sqrt(1.0 - 0.39 ** 2))
-    b_at = (0.40, math.sqrt(1.0 - 0.40 ** 2))
+    # The operational threshold is 0.72: exactly 0.72 -> MATCH, just below -> NO_MATCH.
+    b_below = (0.71, math.sqrt(1.0 - 0.71 ** 2))
+    b_at = (0.72, math.sqrt(1.0 - 0.72 ** 2))
     r1 = finalize_compare(
         document_quality=_verdict("HIGH", "ok"),
         selfie_quality=_verdict("HIGH", "ok"),

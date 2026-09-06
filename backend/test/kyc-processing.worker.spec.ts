@@ -12,7 +12,14 @@ jest.mock("@nestjs/schedule", () => ({
 }));
 
 import type { KycProcessingJob, KycVerification } from "@prisma/client";
+import {
+  FACE_VERIFICATION_PROVIDER,
+  KYC_DOCUMENT_PROVIDER,
+  type FaceVerificationProviderName,
+  type KycDocumentProvider,
+} from "../src/config/app-config.service";
 import { KYC_STATUS } from "../src/kyc/domain/kyc-state";
+import { REMOTE_BIOMETRIC_CONSENT_VERSION } from "../src/kyc/domain/remote-biometric-consent";
 import {
   KYC_PROCESSING_FAILURE,
   KycProcessingWorker,
@@ -100,6 +107,9 @@ interface WorkerHarnessImage {
 interface WorkerHarnessOptions {
   images?: WorkerHarnessImage[];
   faceVerify?: jest.Mock;
+  documentProvider?: KycDocumentProvider;
+  faceVerificationProvider?: FaceVerificationProviderName;
+  verification?: Partial<KycVerification>;
 }
 
 function createWorker(
@@ -118,6 +128,7 @@ function createWorker(
     kycVerification: {
       findUnique: jest.fn().mockResolvedValue({
         ...createVerification(),
+        ...options.verification,
         images:
           options.images ?? [
             { kind: "DOCUMENT", side: "FRONT", storageKey: "document-key" },
@@ -135,7 +146,12 @@ function createWorker(
     verify: options.faceVerify ?? jest.fn(),
   };
   const configService = {
-    values: { ocrMinimumConfidence: 0.8 },
+    values: {
+      ocrMinimumConfidence: 0.8,
+      documentProvider: options.documentProvider ?? KYC_DOCUMENT_PROVIDER.LOCAL,
+      faceVerificationProvider:
+        options.faceVerificationProvider ?? FACE_VERIFICATION_PROVIDER.LOCAL,
+    },
   } as AppConfigService;
 
   return {
@@ -149,6 +165,95 @@ function createWorker(
     transaction,
   };
 }
+
+describe("KycProcessingWorker remote consent guard", () => {
+  it("terminates an external job without reading or transferring images when consent is absent", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const extract = jest.fn();
+    const faceVerify = jest.fn();
+    const { worker, transaction } = createWorker(fileStorage, extract, {
+      documentProvider: KYC_DOCUMENT_PROVIDER.HUGGING_FACE,
+      faceVerify,
+    });
+
+    await worker["processJob"](createJob());
+
+    expect(fileStorage.read).not.toHaveBeenCalled();
+    expect(extract).not.toHaveBeenCalled();
+    expect(faceVerify).not.toHaveBeenCalled();
+    expect(transaction.kycProcessingJob.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "COMPLETED" }),
+      }),
+    );
+    expect(transaction.kycVerification.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: KYC_STATUS.NEEDS_REVIEW,
+          rejectionCode: KYC_PROCESSING_FAILURE.REMOTE_BIOMETRIC_CONSENT_REQUIRED,
+        }),
+      }),
+    );
+  });
+
+  it("guards a remote face-service job before reading images when consent is absent", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const extract = jest.fn();
+    const faceVerify = jest.fn();
+    const { worker, transaction } = createWorker(fileStorage, extract, {
+      faceVerificationProvider: FACE_VERIFICATION_PROVIDER.FACE_SERVICE,
+      faceVerify,
+    });
+
+    await worker["processJob"](createJob());
+
+    expect(fileStorage.read).not.toHaveBeenCalled();
+    expect(extract).not.toHaveBeenCalled();
+    expect(faceVerify).not.toHaveBeenCalled();
+    expect(transaction.kycVerification.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: KYC_STATUS.NEEDS_REVIEW,
+          rejectionCode: KYC_PROCESSING_FAILURE.REMOTE_BIOMETRIC_CONSENT_REQUIRED,
+        }),
+      }),
+    );
+  });
+
+  it("allows an external job with the current consent version and timestamp", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const extract = jest.fn().mockResolvedValue({
+      confidence: 0.95,
+      parsedDocument: {
+        outcome: DOCUMENT_PARSE_OUTCOME.REJECT,
+        documentType: null,
+        documentNumber: null,
+        fullName: null,
+        birthDate: null,
+        issueDate: null,
+        sex: null,
+        height: null,
+        bloodType: null,
+        birthPlace: null,
+        reasonCode: "DOCUMENT_UNSUPPORTED",
+      },
+      frontPresent: true,
+      backPresent: true,
+      audit: { provider: "huggingface", model: "test" },
+    });
+    const { worker } = createWorker(fileStorage, extract, {
+      documentProvider: KYC_DOCUMENT_PROVIDER.HUGGING_FACE,
+      verification: {
+        consentVersion: REMOTE_BIOMETRIC_CONSENT_VERSION,
+        consentAcceptedAt: new Date(),
+      },
+    });
+
+    await worker["processJob"](createJob());
+
+    expect(extract).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("KycProcessingWorker stage failures", () => {
   it("fails closed with a document storage code", async () => {
@@ -571,6 +676,48 @@ describe("KycProcessingWorker document profile persistence", () => {
           documentBirthPlace: null,
           documentType: null,
           documentNumberHash: null,
+        }),
+      }),
+    );
+  });
+
+  it("processes an explicit non-Colombian reject before incomplete coverage", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const extract = jest.fn().mockResolvedValue({
+      confidence: 0.95,
+      parsedDocument: {
+        outcome: DOCUMENT_PARSE_OUTCOME.REJECT,
+        documentType: "PASSPORT",
+        documentNumber: null,
+        fullName: null,
+        birthDate: null,
+        issueDate: null,
+        sex: null,
+        height: null,
+        bloodType: null,
+        birthPlace: null,
+        reasonCode: "DOCUMENT_TYPE_NOT_RECOGNIZED",
+      },
+      frontPresent: false,
+      backPresent: false,
+      audit: { provider: "test", model: "test" },
+    });
+    const { worker, transaction } = createWorker(fileStorage, extract, {
+      images: [
+        { kind: "DOCUMENT", side: "FRONT", storageKey: "document-front-key" },
+        { kind: "SELFIE", side: null, storageKey: "selfie-key" },
+      ],
+    });
+
+    await worker["processJob"](createJob());
+
+    expect(transaction.kycVerification.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: KYC_STATUS.REJECTED,
+          rejectionCode: "DOCUMENT_TYPE_NOT_RECOGNIZED",
+          documentType: null,
+          documentCheckResult: DOCUMENT_PARSE_OUTCOME.REJECT,
         }),
       }),
     );

@@ -3,6 +3,7 @@ jest.mock("@nestjs/common", () => ({
 }));
 
 import {
+  APP_ENVIRONMENT,
   FACE_VERIFICATION_PROVIDER,
   createAppConfiguration,
 } from "../src/config/app-config.service";
@@ -26,6 +27,7 @@ const BASE_ENVIRONMENT: NodeJS.ProcessEnv = {
   KYC_DOCUMENT_PROVIDER: "local",
   FACE_VERIFICATION_PROVIDER: FACE_VERIFICATION_PROVIDER.FACE_SERVICE,
   FACE_API_KEY: "test-face-api-key",
+  KYC_FACE_MIN_SIMILARITY: "0.72",
 };
 
 const DOCUMENT_IMAGE = Buffer.from("synthetic-document-image");
@@ -82,7 +84,7 @@ function createQualityResponse(
 
 const COMPARE_MATCH_RESPONSE = JSON.stringify({
   match: true,
-  similarity: 0.4360883173082909,
+  similarity: 0.8,
   confidence: "low",
   quality_document: "HIGH",
   quality_selfie: "HIGH",
@@ -230,8 +232,8 @@ describe("Face service verification provider", () => {
     const result = await createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE);
 
     expect(result.accepted).toBe(true);
-    expect(result.similarity).toBeCloseTo(0.4360883173082909, 12);
-    expect(result.distance).toBeCloseTo(0.5639116826917091, 12);
+    expect(result.similarity).toBeCloseTo(0.8, 12);
+    expect(result.distance).toBeCloseTo(0.2, 12);
     expect(result.documentFaceCount).toBe(1);
     expect(result.selfieFaceCount).toBe(1);
   });
@@ -264,6 +266,22 @@ describe("Face service verification provider", () => {
       createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
       FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW,
     );
+  });
+
+  it("does not compare when HIGH quality is paired with a non-OK action", async () => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(
+        200,
+        createQualityResponse({ action: "NEEDS_REVIEW" }, {}),
+      ),
+    );
+
+    await expectFaceCaptureError(
+      createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
+      FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW,
+    );
+
+    expect(fetchStub.calls).toHaveLength(1);
   });
 
   it("fails closed when the compare response downgrades a side to LOW quality", async () => {
@@ -363,6 +381,52 @@ describe("Face service verification provider", () => {
     }
   });
 
+  it("times out when response headers arrive but the response body never resolves", async () => {
+    jest.useFakeTimers();
+    try {
+      let capturedSignal: AbortSignal | null = null;
+      const hangingBodyFetch: FaceServiceFetch = async (
+        _input: string,
+        init: RequestInit,
+      ): Promise<FaceServiceFetchResponse> => {
+        capturedSignal = init.signal ?? null;
+        return {
+          ok: true,
+          status: 200,
+          text: (): Promise<string> => new Promise<string>(() => undefined),
+        };
+      };
+
+      const verification = createProvider(hangingBodyFetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE);
+      const expectedTimeout = expectFaceCaptureError(
+        verification,
+        FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE,
+      );
+
+      await jest.advanceTimersByTimeAsync(30_000);
+      await expectedTimeout;
+
+      expect((capturedSignal as AbortSignal | null)?.aborted).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("rejects an HTTP face service URL before sending credentials in production", () => {
+    expect(
+      () =>
+        new FaceServiceVerificationProvider({
+          values: {
+            environment: APP_ENVIRONMENT.PRODUCTION,
+            faceMinimumSimilarity: 0.72,
+            faceServiceUrl: "http://face.internal",
+            faceServiceTimeoutMs: 30_000,
+            faceApiKey: "test-face-api-key",
+          },
+        }),
+    ).toThrow("FACE_SERVICE_URL must use https in production");
+  });
+
   it("fails closed on a malformed response body", async () => {
     const fetchStub = createFetchStub(
       createFetchResponse(200, QUALITY_OK_RESPONSE),
@@ -390,6 +454,86 @@ describe("Face service verification provider", () => {
           reasons: { document: "ok", selfie: "ok" },
         }),
       ),
+    );
+
+    await expectFaceCaptureError(
+      createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
+      FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
+    );
+  });
+
+  it("rejects a MATCHED response below the configured similarity threshold", async () => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(200, JSON.stringify({
+        match: true,
+        similarity: 0.01,
+        confidence: "low",
+        quality_document: "HIGH",
+        quality_selfie: "HIGH",
+        action: "MATCHED",
+        reasons: { document: "ok", selfie: "ok" },
+      })),
+    );
+
+    await expectFaceCaptureError(
+      createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
+      FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
+    );
+  });
+
+  it("accepts similarity exactly at the configured inclusive threshold", async () => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(200, JSON.stringify({
+        match: true,
+        similarity: 0.72,
+        confidence: "high",
+        quality_document: "HIGH",
+        quality_selfie: "HIGH",
+        action: "MATCHED",
+        reasons: { document: "ok", selfie: "ok" },
+      })),
+    );
+
+    const result = await createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE);
+
+    expect(result.accepted).toBe(true);
+    expect(result.similarity).toBe(0.72);
+  });
+
+  it("rejects a NO_MATCH response when similarity is above the threshold", async () => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(200, JSON.stringify({
+        match: false,
+        similarity: 0.8,
+        confidence: "high",
+        quality_document: "HIGH",
+        quality_selfie: "HIGH",
+        action: "NO_MATCH",
+        reasons: { document: "ok", selfie: "ok" },
+      })),
+    );
+
+    await expectFaceCaptureError(
+      createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
+      FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
+    );
+  });
+
+  it("rejects NEEDS_REVIEW when it contains a numeric similarity", async () => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(200, JSON.stringify({
+        match: false,
+        similarity: 0.01,
+        confidence: "low",
+        quality_document: "HIGH",
+        quality_selfie: "HIGH",
+        action: "NEEDS_REVIEW",
+        reasons: { document: "ok", selfie: "ok" },
+      })),
     );
 
     await expectFaceCaptureError(

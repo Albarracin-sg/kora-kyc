@@ -23,7 +23,10 @@ import {
   type KycStatus,
 } from "./domain/kyc-state";
 import { DOCUMENT_SIDE, type DocumentSide } from "./domain/document-side";
-import { REMOTE_BIOMETRIC_CONSENT_VERSION } from "./domain/remote-biometric-consent";
+import {
+  hasCurrentRemoteBiometricConsent,
+  REMOTE_BIOMETRIC_CONSENT_VERSION,
+} from "./domain/remote-biometric-consent";
 import { KYC_TOKENS } from "./kyc.tokens";
 import type { FileStorage } from "./storage/file-storage.port";
 
@@ -114,7 +117,10 @@ export class KycService {
     });
 
     if (activeVerification) {
-      if (this.requiresExternalProcessing() && !this.hasCurrentConsent(activeVerification)) {
+      if (
+        this.requiresExternalProcessing() &&
+        !hasCurrentRemoteBiometricConsent(activeVerification)
+      ) {
         const updatedVerification = await this.prismaService.kycVerification.update({
           where: { id: activeVerification.id },
           data: {
@@ -464,16 +470,9 @@ export class KycService {
   }
 
   private assertVerificationHasRemoteBiometricConsent(verification: KycVerification): void {
-    if (this.requiresExternalProcessing() && !this.hasCurrentConsent(verification)) {
+    if (this.requiresExternalProcessing() && !hasCurrentRemoteBiometricConsent(verification)) {
       throw new ConflictException("Remote verification consent is required before continuing KYC");
     }
-  }
-
-  private hasCurrentConsent(verification: Pick<KycVerification, "consentVersion" | "consentAcceptedAt">): boolean {
-    return (
-      verification.consentVersion === REMOTE_BIOMETRIC_CONSENT_VERSION &&
-      verification.consentAcceptedAt instanceof Date
-    );
   }
 
   private async findCurrentVerification(userId: string): Promise<KycVerificationWithImages | null> {

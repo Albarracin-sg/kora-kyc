@@ -20,6 +20,7 @@ import type {
 const HUGGING_FACE_DOCUMENT_PROVIDER = "huggingface";
 export const HUGGING_FACE_CHAT_COMPLETIONS_URL =
   "https://router.huggingface.co/v1/chat/completions";
+export const HUGGING_FACE_MAX_RESPONSE_BYTES = 256 * 1024;
 
 const HUGGING_FACE_HTTP_STATUS = {
   TOO_MANY_REQUESTS: 429,
@@ -162,21 +163,30 @@ export class HuggingFaceDocumentExtractionProvider implements DocumentExtraction
 
     const controller = new AbortController();
     let didTimeout = false;
+    const deadline = Date.now() + this.timeoutMs;
+    let rejectTimeout: ((reason?: unknown) => void) | undefined;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      rejectTimeout = reject;
+    });
     const timeout = setTimeout(() => {
       didTimeout = true;
       controller.abort();
+      rejectTimeout?.(new Error("Hugging Face document request timed out"));
     }, this.timeoutMs);
 
     try {
-      const response = await this.fetchImplementation(HUGGING_FACE_CHAT_COMPLETIONS_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.apiToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(this.createRequest(images)),
-        signal: controller.signal,
-      });
+      const response = await Promise.race([
+        this.fetchImplementation(HUGGING_FACE_CHAT_COMPLETIONS_URL, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.apiToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(this.createRequest(images)),
+          signal: controller.signal,
+        }),
+        timeoutPromise,
+      ]);
 
       if (response.status === HUGGING_FACE_HTTP_STATUS.TOO_MANY_REQUESTS) {
         throw new ExternalDocumentProviderError(
@@ -191,29 +201,51 @@ export class HuggingFaceDocumentExtractionProvider implements DocumentExtraction
         );
       }
 
-      const responseContent = parseHuggingFaceChatCompletionEnvelope(await response.text());
+      const responseText = await Promise.race([response.text(), timeoutPromise]);
+      if (Buffer.byteLength(responseText, "utf8") > HUGGING_FACE_MAX_RESPONSE_BYTES) {
+        throw new HuggingFaceDocumentExtractionError(
+          HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.INVALID_RESPONSE_ENVELOPE,
+        );
+      }
+      if (didTimeout || Date.now() >= deadline) {
+        throw new HuggingFaceDocumentExtractionError(
+          HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.REQUEST_TIMEOUT,
+        );
+      }
+
+      const responseContent = parseHuggingFaceChatCompletionEnvelope(responseText);
+      const parsedDocument = parseDocumentExtractionResponse(
+        responseContent,
+        huggingFaceResponseErrorFactory,
+      );
+      if (didTimeout || Date.now() >= deadline) {
+        throw new HuggingFaceDocumentExtractionError(
+          HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.REQUEST_TIMEOUT,
+        );
+      }
+
       return {
-        ...parseDocumentExtractionResponse(responseContent, huggingFaceResponseErrorFactory),
+        ...parsedDocument,
         audit: this.audit,
       };
     } catch (error: unknown) {
+      if (didTimeout || Date.now() >= deadline) {
+        throw new HuggingFaceDocumentExtractionError(
+          HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.REQUEST_TIMEOUT,
+        );
+      }
       if (
         error instanceof HuggingFaceDocumentExtractionError ||
         error instanceof ExternalDocumentProviderError
       ) {
         throw error;
       }
-      if (didTimeout) {
-        throw new HuggingFaceDocumentExtractionError(
-          HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.REQUEST_TIMEOUT,
-        );
-      }
-
       throw new HuggingFaceDocumentExtractionError(
         HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.REQUEST_FAILED,
       );
     } finally {
       clearTimeout(timeout);
+      controller.abort();
     }
   }
 

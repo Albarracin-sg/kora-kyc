@@ -16,6 +16,15 @@ interface ErrorBody {
   timestamp: string;
 }
 
+interface HttpRequestForErrorHandling {
+  method?: string;
+  originalUrl?: string;
+  url?: string;
+  query?: unknown;
+  params?: unknown;
+  body?: unknown;
+}
+
 /**
  * Central exception filter that normalizes every error into a consistent JSON
  * envelope: `{ statusCode, message, path, timestamp }`.
@@ -35,15 +44,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<Response>();
-    const request = host
-      .switchToHttp()
-      .getRequest<{ method?: string; originalUrl?: string; url?: string }>();
-    const path = request.originalUrl ?? request.url ?? "";
+    const request = host.switchToHttp().getRequest<HttpRequestForErrorHandling>();
+    const path = pathWithoutQuery(request.originalUrl ?? request.url ?? "");
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const rawBody = exception.getResponse();
-      const message = this.extractMessage(rawBody);
+      const message = this.extractMessage(rawBody, request);
 
       const body: ErrorBody = {
         statusCode: status,
@@ -69,20 +76,52 @@ export class HttpExceptionFilter implements ExceptionFilter {
     } satisfies ErrorBody);
   }
 
-  private extractMessage(rawBody: unknown): string | string[] {
+  private extractMessage(rawBody: unknown, request: HttpRequestForErrorHandling): string | string[] {
     if (rawBody && typeof rawBody === "object" && "message" in rawBody) {
       const message = (rawBody as { message: unknown }).message;
       if (typeof message === "string") {
-        return message;
+        return this.withoutRequestInput(message, request);
       }
       if (Array.isArray(message) && message.every((item) => typeof item === "string")) {
-        return message;
+        return this.withoutRequestInput(message, request);
       }
     }
     if (typeof rawBody === "string") {
-      return rawBody;
+      return this.withoutRequestInput(rawBody, request);
     }
     return "Request failed";
+  }
+
+  private withoutRequestInput(
+    message: string | string[],
+    request: HttpRequestForErrorHandling,
+  ): string | string[] {
+    const inputValues = [request.query, request.params, request.body]
+      .flatMap((input) => this.stringValuesOf(input))
+      .filter((value) => value.length > 0);
+    const messages = Array.isArray(message) ? message : [message];
+
+    if (inputValues.some((inputValue) => messages.some((item) => item.includes(inputValue)))) {
+      return "Request failed";
+    }
+
+    return message;
+  }
+
+  private stringValuesOf(value: unknown): string[] {
+    if (typeof value === "string") {
+      return [value];
+    }
+    if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+      return [String(value)];
+    }
+    if (Array.isArray(value)) {
+      return value.flatMap((item) => this.stringValuesOf(item));
+    }
+    if (value && typeof value === "object") {
+      return Object.values(value).flatMap((item) => this.stringValuesOf(item));
+    }
+    return [];
   }
 
   private stackOf(exception: unknown): string | undefined {
@@ -91,4 +130,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
     return exception instanceof Error ? exception.stack : undefined;
   }
+}
+
+function pathWithoutQuery(url: string): string {
+  const queryStart = url.indexOf("?");
+  return queryStart === -1 ? url : url.slice(0, queryStart);
 }

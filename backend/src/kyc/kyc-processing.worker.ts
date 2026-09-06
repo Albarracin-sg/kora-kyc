@@ -2,11 +2,18 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { Interval } from "@nestjs/schedule";
 import type { KycImage, KycProcessingJob, KycVerification } from "@prisma/client";
 import { createHash, randomUUID } from "node:crypto";
-import { AppConfigService } from "../config/app-config.service";
+import {
+  AppConfigService,
+  FACE_VERIFICATION_PROVIDER,
+  KYC_DOCUMENT_PROVIDER,
+} from "../config/app-config.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { DOCUMENT_SIDE, type DocumentSide } from "./domain/document-side";
 import { KYC_IMAGE_KIND } from "./domain/kyc-image-kind";
 import { KYC_STATUS, assertKycTransition, type KycStatus } from "./domain/kyc-state";
+import {
+  hasCurrentRemoteBiometricConsent,
+} from "./domain/remote-biometric-consent";
 import { KYC_TOKENS } from "./kyc.tokens";
 import {
   DOCUMENT_PARSE_OUTCOME,
@@ -47,6 +54,7 @@ export const KYC_PROCESSING_FAILURE = {
   FACE_STORAGE_READ_FAILED: "FACE_STORAGE_READ_FAILED",
   FACE_RUNTIME_FAILED: "FACE_RUNTIME_FAILED",
   FACE_MODEL_UNAVAILABLE: "FACE_MODEL_UNAVAILABLE",
+  REMOTE_BIOMETRIC_CONSENT_REQUIRED: "REMOTE_BIOMETRIC_CONSENT_REQUIRED",
 } as const;
 
 type KycProcessingFailureCode =
@@ -217,6 +225,14 @@ export class KycProcessingWorker {
       return;
     }
 
+    if (
+      this.requiresExternalProcessing() &&
+      !hasCurrentRemoteBiometricConsent(verification)
+    ) {
+      await this.complete(job, verification, this.remoteConsentRequiredOutcome());
+      return;
+    }
+
     const selfieImage = verification.images.find((image) => image.kind === KYC_IMAGE_KIND.SELFIE);
     const documentImages = verification.images.filter(
       (image) => image.kind === KYC_IMAGE_KIND.DOCUMENT,
@@ -280,6 +296,14 @@ export class KycProcessingWorker {
         KYC_PROCESSING_FAILURE.DOCUMENT_PROVIDER_FAILED,
       );
       return;
+    }
+
+    if (extractedDocument.parsedDocument.outcome === DOCUMENT_PARSE_OUTCOME.REJECT) {
+      const documentOutcome = this.evaluateDocument(extractedDocument);
+      if (documentOutcome) {
+        await this.complete(job, verification, documentOutcome);
+        return;
+      }
     }
 
     const coverageOutcome = this.evaluateCoverage(extractedDocument, documentImages);
@@ -551,11 +575,11 @@ export class KycProcessingWorker {
   }
 
   private evaluateDocument(extraction: DocumentExtractionResult): KycTerminalOutcome | null {
-    if (extraction.confidence < this.configService.values.ocrMinimumConfidence) {
+    if (extraction.parsedDocument.outcome === DOCUMENT_PARSE_OUTCOME.REJECT) {
       return {
-        status: KYC_STATUS.NEEDS_REVIEW,
-        reasonCode: "OCR_CONFIDENCE_TOO_LOW",
-        documentType: extraction.parsedDocument.documentType,
+        status: KYC_STATUS.REJECTED,
+        reasonCode: extraction.parsedDocument.reasonCode,
+        documentType: null,
         documentNumberHash: null,
         ...this.documentProfileFields(extraction),
         documentOcrConfidence: extraction.confidence,
@@ -566,11 +590,11 @@ export class KycProcessingWorker {
       };
     }
 
-    if (extraction.parsedDocument.outcome === DOCUMENT_PARSE_OUTCOME.REJECT) {
+    if (extraction.confidence < this.configService.values.ocrMinimumConfidence) {
       return {
-        status: KYC_STATUS.REJECTED,
-        reasonCode: extraction.parsedDocument.reasonCode,
-        documentType: null,
+        status: KYC_STATUS.NEEDS_REVIEW,
+        reasonCode: "OCR_CONFIDENCE_TOO_LOW",
+        documentType: extraction.parsedDocument.documentType,
         documentNumberHash: null,
         ...this.documentProfileFields(extraction),
         documentOcrConfidence: extraction.confidence,
@@ -651,6 +675,37 @@ export class KycProcessingWorker {
       faceDistance: null,
       faceSimilarity: null,
     };
+  }
+
+  private remoteConsentRequiredOutcome(): KycTerminalOutcome {
+    return {
+      status: KYC_STATUS.NEEDS_REVIEW,
+      reasonCode: KYC_PROCESSING_FAILURE.REMOTE_BIOMETRIC_CONSENT_REQUIRED,
+      documentType: null,
+      documentNumberHash: null,
+      documentFullName: null,
+      documentNumber: null,
+      documentBirthDate: null,
+      documentIssueDate: null,
+      documentSex: null,
+      documentHeight: null,
+      documentBloodType: null,
+      documentBirthPlace: null,
+      documentCheckResult: null,
+      documentOcrConfidence: null,
+      documentProvider: null,
+      documentProviderModel: null,
+      faceDistance: null,
+      faceSimilarity: null,
+    };
+  }
+
+  private requiresExternalProcessing(): boolean {
+    return (
+      this.configService.values.documentProvider === KYC_DOCUMENT_PROVIDER.GEMINI ||
+      this.configService.values.documentProvider === KYC_DOCUMENT_PROVIDER.HUGGING_FACE ||
+      this.configService.values.faceVerificationProvider === FACE_VERIFICATION_PROVIDER.FACE_SERVICE
+    );
   }
 
   private documentProfileFields(

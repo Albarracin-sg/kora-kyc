@@ -16,6 +16,7 @@ import {
 import {
   HUGGING_FACE_CHAT_COMPLETIONS_URL,
   HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE,
+  HUGGING_FACE_MAX_RESPONSE_BYTES,
   HuggingFaceDocumentExtractionError,
   HuggingFaceDocumentExtractionProvider,
   type HuggingFaceFetch,
@@ -213,6 +214,53 @@ describe("Hugging Face document extraction", () => {
     });
   });
 
+  it("parses a valid response that omits unreadable optional profile fields", async () => {
+    const responseWithoutOptionalFields = JSON.parse(VALID_DOCUMENT_RESPONSE) as Record<
+      string,
+      unknown
+    >;
+    for (const field of ["issueDate", "sex", "height", "bloodType", "birthPlace"]) {
+      delete responseWithoutOptionalFields[field];
+    }
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, createEnvelope(JSON.stringify(responseWithoutOptionalFields))),
+    );
+
+    const result = await createProvider(fetchStub.fetch).extract([createLabeledImage("FRONT")]);
+
+    expect(result.parsedDocument).toEqual({
+      outcome: DOCUMENT_PARSE_OUTCOME.VALID,
+      documentType: "COLOMBIAN_CEDULA",
+      documentNumber: "123456",
+      fullName: "TEST PERSON",
+      birthDate: "1990-05-16",
+      issueDate: null,
+      sex: null,
+      height: null,
+      bloodType: null,
+      birthPlace: null,
+      reasonCode: "DOCUMENT_PARSED",
+    });
+  });
+
+  it.each([
+    "DOCUMENT_NUMBER_12345678",
+    "TEST PERSON 1990-05-16",
+  ])("maps an unrecognized reason %j to the safe fallback", async (reason) => {
+    const responseWithUnknownReason = {
+      ...(JSON.parse(VALID_DOCUMENT_RESPONSE) as Record<string, unknown>),
+      reason,
+    };
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, createEnvelope(JSON.stringify(responseWithUnknownReason))),
+    );
+
+    const result = await createProvider(fetchStub.fetch).extract([createLabeledImage("FRONT")]);
+
+    expect(result.parsedDocument.reasonCode).toBe("DOCUMENT_REASON_UNSPECIFIED");
+    expect(JSON.stringify(result)).not.toContain(reason);
+  });
+
   it("fails closed for malformed envelopes, malformed content, and unexpected content fields", async () => {
     const malformedEnvelope = createFetchStub(createFetchResponse(200, "not-json"));
     await expect(
@@ -292,6 +340,47 @@ describe("Hugging Face document extraction", () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it("times out when response headers arrive but the response body never resolves", async () => {
+    jest.useFakeTimers();
+    try {
+      let capturedSignal: AbortSignal | null = null;
+      const hangingBodyFetch: HuggingFaceFetch = async (
+        _input: string,
+        init: RequestInit,
+      ): Promise<HuggingFaceFetchResponse> => {
+        capturedSignal = init.signal ?? null;
+        return {
+          ok: true,
+          status: 200,
+          text: (): Promise<string> => new Promise<string>(() => undefined),
+        };
+      };
+
+      const extraction = createProvider(hangingBodyFetch).extract([createLabeledImage("FRONT")]);
+      const expectedTimeout = expect(extraction).rejects.toMatchObject({
+        code: HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.REQUEST_TIMEOUT,
+      } satisfies Partial<HuggingFaceDocumentExtractionError>);
+
+      await jest.advanceTimersByTimeAsync(1_000);
+      await expectedTimeout;
+
+      expect((capturedSignal as AbortSignal | null)?.aborted).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("rejects a response body that exceeds the structured-response limit", async () => {
+    const oversizedBody = "x".repeat(HUGGING_FACE_MAX_RESPONSE_BYTES + 1);
+    const fetchStub = createFetchStub(createFetchResponse(200, oversizedBody));
+
+    await expect(
+      createProvider(fetchStub.fetch).extract([createLabeledImage("FRONT")]),
+    ).rejects.toMatchObject({
+      code: HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.INVALID_RESPONSE_ENVELOPE,
+    } satisfies Partial<HuggingFaceDocumentExtractionError>);
   });
 
   it("requires an explicit Hugging Face token, model/provider pair, and sane timeout", () => {

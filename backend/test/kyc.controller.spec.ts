@@ -58,3 +58,16 @@ describe("KycController consent requirements", () => {
     expect(mockGet).toHaveBeenCalledWith("consent-requirements");
   });
 });
+
+describe("KycController document side validation", () => {
+  it("does not reflect an invalid side value in the error message", () => {
+    const controller = new KycController({} as KycService);
+    const parseSide = Reflect.get(controller, "parseSide") as (side: string) => unknown;
+    const attackerInput = "NOT_A_SIDE_WITH_SECRET";
+
+    expect(() => parseSide.call(controller, attackerInput)).toThrow(
+      "Invalid document side. Use FRONT, BACK, or COMBINED",
+    );
+    expect(() => parseSide.call(controller, attackerInput)).not.toThrow(attackerInput);
+  });
+});

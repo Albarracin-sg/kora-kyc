@@ -9,7 +9,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 
-DEFAULT_MATCH_THRESHOLD = 0.40
+DEFAULT_MATCH_THRESHOLD = 0.72
 DEFAULT_HIGH_CONFIDENCE_THRESHOLD = 0.60
 # Calibrated from a real phone selfie: its raw Laplacian variance was
 # 38.2, and the previous 50.0 floor wrongly flagged it `blurry`.  The

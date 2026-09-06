@@ -2,6 +2,7 @@ import {
   DOCUMENT_EXTRACTION_INSTRUCTION,
   DOCUMENT_EXTRACTION_REASON_CODE,
   DOCUMENT_EXTRACTION_RESPONSE_FIELDS,
+  DOCUMENT_EXTRACTION_RESPONSE_REQUIRED_FIELDS,
   DOCUMENT_EXTRACTION_RESPONSE_FAILURE,
   DOCUMENT_EXTRACTION_RESPONSE_SCHEMA,
   parseDocumentExtractionResponse,
@@ -32,13 +33,16 @@ function parseResponse(overrides: Record<string, unknown> = {}) {
 }
 
 describe("document extraction response contract", () => {
-  it("requires nullable blood type and birth place fields and rejects additional fields", () => {
+  it("keeps core fields required, allows nullable profile omissions, and rejects additional fields", () => {
     expect(DOCUMENT_EXTRACTION_RESPONSE_FIELDS).toEqual(
       expect.arrayContaining(["bloodType", "birthPlace"]),
     );
     expect(DOCUMENT_EXTRACTION_RESPONSE_SCHEMA.additionalProperties).toBe(false);
     expect(DOCUMENT_EXTRACTION_RESPONSE_SCHEMA.required).toEqual(
-      expect.arrayContaining(["bloodType", "birthPlace"]),
+      DOCUMENT_EXTRACTION_RESPONSE_REQUIRED_FIELDS,
+    );
+    expect(DOCUMENT_EXTRACTION_RESPONSE_REQUIRED_FIELDS).not.toEqual(
+      expect.arrayContaining(["issueDate", "sex", "height", "bloodType", "birthPlace"]),
     );
     expect(DOCUMENT_EXTRACTION_RESPONSE_SCHEMA.properties.bloodType).toEqual({
       anyOf: [{ type: "string" }, { type: "null" }],
@@ -47,15 +51,27 @@ describe("document extraction response contract", () => {
       anyOf: [{ type: "string" }, { type: "null" }],
     });
 
-    const missingField: Record<string, unknown> = { ...BASE_RESPONSE };
-    delete missingField.bloodType;
-    expect(() =>
-      parseDocumentExtractionResponse(JSON.stringify(missingField), {
+    const missingOptionalFields: Record<string, unknown> = { ...BASE_RESPONSE };
+    for (const field of ["issueDate", "sex", "height", "bloodType", "birthPlace"]) {
+      delete missingOptionalFields[field];
+    }
+    expect(
+      parseDocumentExtractionResponse(JSON.stringify(missingOptionalFields), {
         create: (code) => new Error(code),
-      }),
-    ).toThrow(
-      DOCUMENT_EXTRACTION_RESPONSE_FAILURE.INVALID_RESPONSE_SCHEMA,
-    );
+      }).parsedDocument,
+    ).toEqual({
+      outcome: DOCUMENT_PARSE_OUTCOME.VALID,
+      documentType: "COLOMBIAN_CEDULA",
+      documentNumber: "1234567890",
+      fullName: "MARIA ELENA GOMEZ",
+      birthDate: "1990-05-16",
+      issueDate: null,
+      sex: null,
+      height: null,
+      bloodType: null,
+      birthPlace: null,
+      reasonCode: "DOCUMENT_PARSED",
+    });
 
     expect(() => parseResponse({ extraField: "not allowed" })).toThrow(
       DOCUMENT_EXTRACTION_RESPONSE_FAILURE.INVALID_RESPONSE_SCHEMA,
@@ -101,6 +117,31 @@ describe("document extraction response contract", () => {
     expect(parseResponse({ birthPlace: null }).parsedDocument.birthPlace).toBeNull();
   });
 
+  it.each([
+    ["issueDate", 2020],
+    ["sex", false],
+    ["height", { value: "1,75 m" }],
+    ["bloodType", ["O+"]],
+    ["birthPlace", 123],
+    ["result", "UNKNOWN"],
+    ["confidence", "0.94"],
+    ["frontPresent", "true"],
+    ["reason", null],
+  ])("rejects an invalid type or enum in %s", (field, value) => {
+    expect(() => parseResponse({ [field]: value })).toThrow(
+      DOCUMENT_EXTRACTION_RESPONSE_FAILURE.INVALID_RESPONSE_SCHEMA,
+    );
+  });
+
+  it.each(["x".repeat(129), "unsafe\nreason", "unsafe\u0000reason"])(
+    "rejects an unsafe reason boundary value %j",
+    (reason) => {
+      expect(() => parseResponse({ reason })).toThrow(
+        DOCUMENT_EXTRACTION_RESPONSE_FAILURE.INVALID_RESPONSE_SCHEMA,
+      );
+    },
+  );
+
   it.each(Object.values(DOCUMENT_EXTRACTION_REASON_CODE))(
     "accepts canonical reason code %s",
     (reason) => {
@@ -113,18 +154,13 @@ describe("document extraction response contract", () => {
     "BIRTH_DATE_1990-05-16",
     "FULL_NAME_MARIA_ELENA_GOMEZ",
     "document number exposed",
-  ])("rejects dynamic or PII-bearing reason %j", (reason) => {
-    const create = jest.fn((code: string) => new Error(code));
+  ])("maps dynamic or PII-bearing reason %j to the safe fallback", (reason) => {
+    const result = parseResponse({ reason });
 
-    expect(() =>
-      parseDocumentExtractionResponse(JSON.stringify({ ...BASE_RESPONSE, reason }), { create }),
-    ).toThrow(DOCUMENT_EXTRACTION_RESPONSE_FAILURE.INVALID_RESPONSE_SCHEMA);
-    expect(create).toHaveBeenCalledWith(
-      DOCUMENT_EXTRACTION_RESPONSE_FAILURE.INVALID_RESPONSE_SCHEMA,
+    expect(result.parsedDocument.reasonCode).toBe(
+      DOCUMENT_EXTRACTION_REASON_CODE.DOCUMENT_REASON_UNSPECIFIED,
     );
-    expect(create).not.toHaveBeenCalledWith(expect.stringContaining("12345678"));
-    expect(create).not.toHaveBeenCalledWith(expect.stringContaining("MARIA"));
-    expect(create).not.toHaveBeenCalledWith(expect.stringContaining("1990-05-16"));
+    expect(result.parsedDocument).not.toHaveProperty("reason");
   });
 
   it("classifies unsupported evidence as REJECT and ambiguous evidence as REVIEW", () => {
@@ -202,5 +238,6 @@ describe("document extraction response contract", () => {
     expect(DOCUMENT_EXTRACTION_INSTRUCTION).toMatch(/REJECT si ninguna imagen corresponde/i);
     expect(DOCUMENT_EXTRACTION_INSTRUCTION).toMatch(/REVIEW si la evidencia es ambigua/i);
     expect(DOCUMENT_EXTRACTION_INSTRUCTION).toMatch(/no es una comprobación antifraude/i);
+    expect(DOCUMENT_EXTRACTION_INSTRUCTION).toContain("DOCUMENT_REASON_UNSPECIFIED");
   });
 });

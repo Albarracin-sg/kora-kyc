@@ -105,6 +105,21 @@ describe("createAppConfiguration face verification provider", () => {
     ).toThrow("FACE_SERVICE_URL must be an http(s) URL");
   });
 
+  it("rejects an HTTP face service URL in production", () => {
+    expect(() =>
+      createAppConfiguration(
+        {
+          ...baseEnvironment(),
+          NODE_ENV: "production",
+          FACE_VERIFICATION_PROVIDER: FACE_VERIFICATION_PROVIDER.FACE_SERVICE,
+          FACE_API_KEY: "test-face-api-key",
+          FACE_SERVICE_URL: "http://face.internal",
+        },
+        process.cwd(),
+      ),
+    ).toThrow("FACE_SERVICE_URL must use https in production");
+  });
+
   it("bounds the face service timeout to a sane range", () => {
     expect(() =>
       createAppConfiguration(

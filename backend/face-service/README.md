@@ -107,7 +107,7 @@ degradation.
 
 | Variable                         | Default    | Meaning                                                              |
 | -------------------------------- | ---------- | -------------------------------------------------------------------- |
-| `FACE_MATCH_THRESHOLD`           | `0.40`     | Cosine similarity at or above which faces match (calibrated for buffalo_l) |
+| `FACE_MATCH_THRESHOLD`           | `0.72`     | Cosine similarity at or above which faces match                         |
 | `FACE_HIGH_CONFIDENCE_THRESHOLD` | `0.60`     | Similarity at or above which `confidence` is `high`                  |
 | `FACE_BLUR_THRESHOLD`            | `25.0`     | Laplacian-variance floor; below it the image is `blurry`             |
 | `FACE_MIN_WIDTH_PX`              | `100`      | Minimum face width in px; strictly below is `face_resolution_too_small` |

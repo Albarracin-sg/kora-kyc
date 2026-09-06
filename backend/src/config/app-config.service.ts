@@ -283,10 +283,28 @@ function readFaceVerificationProvider(
   throw new Error("FACE_VERIFICATION_PROVIDER must be local or face_service");
 }
 
-function readFaceServiceUrl(environment: NodeJS.ProcessEnv): string {
+function readFaceServiceUrl(
+  environment: NodeJS.ProcessEnv,
+  appEnvironment: AppEnvironment,
+  faceVerificationProvider: FaceVerificationProviderName,
+): string {
   const rawValue = environment.FACE_SERVICE_URL?.trim() || "http://localhost:8000";
-  if (!/^https?:\/\/.+/i.test(rawValue)) {
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(rawValue);
+  } catch {
     throw new Error("FACE_SERVICE_URL must be an http(s) URL");
+  }
+
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    throw new Error("FACE_SERVICE_URL must be an http(s) URL");
+  }
+  if (
+    appEnvironment === APP_ENVIRONMENT.PRODUCTION &&
+    faceVerificationProvider === FACE_VERIFICATION_PROVIDER.FACE_SERVICE &&
+    parsedUrl.protocol !== "https:"
+  ) {
+    throw new Error("FACE_SERVICE_URL must use https in production");
   }
 
   return rawValue.replace(/\/+$/, "");
@@ -362,11 +380,12 @@ export function createAppConfiguration(
     environment.LOCAL_STORAGE_ROOT ?? "upload",
   );
   const assetsRoot = resolve(workingDirectory, environment.KYC_ASSETS_ROOT ?? "assets");
+  const appEnvironment = readEnvironment(environment);
   const documentProvider = readDocumentProvider(environment);
   const faceVerificationProvider = readFaceVerificationProvider(environment);
 
   return {
-    environment: readEnvironment(environment),
+    environment: appEnvironment,
     port: readPositiveInteger(environment, "PORT", CONFIG_DEFAULTS.port),
     databaseUrl: requiredEnvironmentValue(environment, "DATABASE_URL"),
     jwtSecret: requiredEnvironmentValue(environment, "JWT_SECRET"),
@@ -438,7 +457,7 @@ export function createAppConfiguration(
     documentHashPepper: requiredEnvironmentValue(environment, "KYC_DOCUMENT_HASH_PEPPER"),
     documentProvider,
     faceVerificationProvider,
-    faceServiceUrl: readFaceServiceUrl(environment),
+    faceServiceUrl: readFaceServiceUrl(environment, appEnvironment, faceVerificationProvider),
     faceServiceTimeoutMs: readBoundedPositiveInteger(
       environment,
       "FACE_SERVICE_TIMEOUT_MS",

@@ -1,5 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import type { AppConfiguration } from "../../config/app-config.service";
+import {
+  APP_ENVIRONMENT,
+  type AppConfiguration,
+} from "../../config/app-config.service";
 import {
   FACE_CAPTURE_FAILURE_CODE,
   FaceCaptureError,
@@ -58,6 +61,11 @@ const FACE_SERVICE_COMPARE_ACTION = {
   NEEDS_REVIEW: "NEEDS_REVIEW",
 } as const;
 
+const FACE_SERVICE_QUALITY_CONTRACT = {
+  HIGH: "HIGH",
+  OK: "OK",
+} as const;
+
 const FACE_SERVICE_METRIC_RANGE = {
   MIN_SIMILARITY: -1,
   MAX_SIMILARITY: 1,
@@ -66,7 +74,14 @@ const FACE_SERVICE_METRIC_RANGE = {
 } as const;
 
 export interface FaceServiceProviderConfiguration {
-  values: Pick<AppConfiguration, "faceServiceUrl" | "faceServiceTimeoutMs" | "faceApiKey">;
+  values: Pick<
+    AppConfiguration,
+    | "environment"
+    | "faceMinimumSimilarity"
+    | "faceServiceUrl"
+    | "faceServiceTimeoutMs"
+    | "faceApiKey"
+  >;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -190,6 +205,7 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
   private readonly faceServiceUrl: string;
   private readonly faceServiceTimeoutMs: number;
   private readonly faceApiKey: string;
+  private readonly faceMinimumSimilarity: number;
 
   constructor(
     configuration: FaceServiceProviderConfiguration,
@@ -198,6 +214,14 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
     this.faceServiceUrl = configuration.values.faceServiceUrl;
     this.faceServiceTimeoutMs = configuration.values.faceServiceTimeoutMs;
     this.faceApiKey = configuration.values.faceApiKey;
+    this.faceMinimumSimilarity = configuration.values.faceMinimumSimilarity;
+
+    if (
+      configuration.values.environment === APP_ENVIRONMENT.PRODUCTION &&
+      new URL(this.faceServiceUrl).protocol !== "https:"
+    ) {
+      throw new Error("FACE_SERVICE_URL must use https in production");
+    }
   }
 
   async verify(documentImage: Buffer, selfieImage: Buffer): Promise<FaceVerificationResult> {
@@ -207,7 +231,12 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
     };
 
     const quality = await this.post(FACE_SERVICE_QUALITY_PATH, request, parseQualityResponse);
-    if (quality.document.quality !== "HIGH" || quality.selfie.quality !== "HIGH") {
+    if (
+      quality.document.quality !== FACE_SERVICE_QUALITY_CONTRACT.HIGH ||
+      quality.selfie.quality !== FACE_SERVICE_QUALITY_CONTRACT.HIGH ||
+      quality.document.action !== FACE_SERVICE_QUALITY_CONTRACT.OK ||
+      quality.selfie.action !== FACE_SERVICE_QUALITY_CONTRACT.OK
+    ) {
       throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW);
     }
 
@@ -215,14 +244,10 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
     if (compare.quality_document !== "HIGH" || compare.quality_selfie !== "HIGH") {
       throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW);
     }
-    if (
-      (compare.action === FACE_SERVICE_COMPARE_ACTION.MATCHED && !compare.match) ||
-      (compare.action === FACE_SERVICE_COMPARE_ACTION.NO_MATCH && compare.match) ||
-      (compare.action === FACE_SERVICE_COMPARE_ACTION.NEEDS_REVIEW && compare.match)
-    ) {
-      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
-    }
     if (compare.action === FACE_SERVICE_COMPARE_ACTION.NEEDS_REVIEW) {
+      if (compare.match || compare.similarity !== null) {
+        throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
+      }
       // The service could not produce embeddings for a comparison. This is
       // equivalent to the local provider being unable to embed the faces.
       throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.EMBEDDING_UNAVAILABLE);
@@ -239,6 +264,18 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
     }
     const distance = calculateFaceServiceDistance(compare.similarity);
     if (distance === null) {
+      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
+    }
+    const matchesThreshold = compare.similarity >= this.faceMinimumSimilarity;
+    if (compare.match !== matchesThreshold) {
+      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
+    }
+    if (
+      (compare.action === FACE_SERVICE_COMPARE_ACTION.MATCHED &&
+        (!compare.match || !matchesThreshold)) ||
+      (compare.action === FACE_SERVICE_COMPARE_ACTION.NO_MATCH &&
+        (compare.match || matchesThreshold))
+    ) {
       throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
     }
 
@@ -260,48 +297,58 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
     parse: (value: unknown) => T | null,
   ): Promise<T> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.faceServiceTimeoutMs);
-    let response: FaceServiceFetchResponse;
+    let rejectTimeout: ((reason?: unknown) => void) | undefined;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      rejectTimeout = reject;
+    });
+    const timeout = setTimeout(() => {
+      controller.abort();
+      rejectTimeout?.(new Error("Face service request timed out"));
+    }, this.faceServiceTimeoutMs);
+
     try {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         "X-API-Key": this.faceApiKey,
       };
-      response = await this.fetchImplementation(`${this.faceServiceUrl}${path}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } catch {
+      const response = await Promise.race([
+        this.fetchImplementation(`${this.faceServiceUrl}${path}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        }),
+        timeoutPromise,
+      ]);
+
+      if (!response.ok) {
+        throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE);
+      }
+
+      const responseText = await Promise.race([response.text(), timeoutPromise]);
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(responseText);
+      } catch {
+        throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
+      }
+
+      const value = parse(parsed);
+      if (value === null) {
+        throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
+      }
+
+      return value;
+    } catch (error: unknown) {
+      if (error instanceof FaceCaptureError) {
+        throw error;
+      }
+
       throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE);
     } finally {
       clearTimeout(timeout);
+      controller.abort();
     }
-
-    if (!response.ok) {
-      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE);
-    }
-
-    let responseText: string;
-    try {
-      responseText = await response.text();
-    } catch {
-      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE);
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(responseText);
-    } catch {
-      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
-    }
-
-    const value = parse(parsed);
-    if (value === null) {
-      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
-    }
-
-    return value;
   }
 }

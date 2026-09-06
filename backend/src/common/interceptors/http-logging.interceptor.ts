@@ -34,7 +34,7 @@ export class HttpLoggingInterceptor implements NestInterceptor {
     const startedAt = process.hrtime.bigint();
 
     const method = request.method ?? "?";
-    const url = request.originalUrl ?? request.url ?? "";
+    const url = pathWithoutQuery(request.originalUrl ?? request.url ?? "");
     const ip = request.ip ?? "unknown";
 
     if (isDocumentationAsset(url)) {
@@ -74,4 +74,9 @@ export class HttpLoggingInterceptor implements NestInterceptor {
     const user = (request as Request & { user?: { id?: string } }).user;
     return user?.id ? ` user=${user.id}` : "";
   }
+}
+
+function pathWithoutQuery(url: string): string {
+  const queryStart = url.indexOf("?");
+  return queryStart === -1 ? url : url.slice(0, queryStart);
 }
