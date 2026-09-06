@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PrimaryButton, BUTTON_VARIANT } from "../components/primary-button";
 import { BackToHomeButton } from "../components/back-to-home-button";
-import { ScreenShell } from "../components/screen-shell";
+import { AuthenticatedScreenShell } from "../components/authenticated-screen-shell";
 import { StatusBadge } from "../components/status-badge";
 import { toUserFacingError } from "../contexts/auth-context";
 import { APP_ROUTE, type AppScreenProps } from "../navigation/routes";
@@ -39,8 +39,8 @@ export function KycHistoryScreen({ navigation }: AppScreenProps<typeof APP_ROUTE
     } catch (loadError: unknown) { setError(toUserFacingError(loadError)); }
   }
 
-  return <ScreenShell><View style={styles.content}>
-    <View style={styles.header}><View><Text style={styles.eyebrow}>KORA / REGISTRO PRIVADO</Text><Text style={styles.title}>Historial privado</Text><Text style={styles.intro}>Registros de verificación</Text></View><BackToHomeButton navigation={navigation} /></View>
+  return <AuthenticatedScreenShell activeRoute={APP_ROUTE.KYC_HISTORY} navigation={navigation}><View style={styles.content}>
+     <View style={styles.header}><BackToHomeButton navigation={navigation} /><View style={styles.headerCopy}><Text style={styles.eyebrow}>KORA / REGISTRO PRIVADO</Text><Text style={styles.title}>Historial privado</Text><Text style={styles.intro}>Registros de verificación</Text></View></View>
     {loading ? <Text style={styles.copy}>Cargando historial privado…</Text> : null}
     {items.map((item) => {
       const presentation = getKycStatusPresentation(item.status, null);
@@ -53,9 +53,9 @@ export function KycHistoryScreen({ navigation }: AppScreenProps<typeof APP_ROUTE
     {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
     {nextCursor ? <PrimaryButton label="Cargar más" onPress={loadMore} variant={BUTTON_VARIANT.GHOST} /> : null}
     <PrimaryButton label="Volver" onPress={() => navigation.goBack()} variant={BUTTON_VARIANT.GHOST} />
-  </View></ScreenShell>;
+   </View></AuthenticatedScreenShell>;
 }
 
 const styles = StyleSheet.create({
-  content: { flex: 1, gap: SPACING.md }, header: { alignItems: "flex-start", flexDirection: "row", justifyContent: "space-between", marginBottom: SPACING.sm }, eyebrow: { color: COLORS.mintDark, fontFamily: FONT.label, fontSize: 11, letterSpacing: 1.3 }, title: { color: COLORS.ink, fontFamily: FONT.display, fontSize: 38 }, intro: { color: COLORS.muted, fontFamily: FONT.body, fontSize: 16 }, entry: { backgroundColor: COLORS.panel, borderColor: COLORS.line, borderRadius: RADIUS.md, borderWidth: 1, gap: SPACING.sm, padding: SPACING.md }, entryPressed: { backgroundColor: COLORS.panelRaised }, entryHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" }, date: { color: COLORS.ink, fontFamily: FONT.display, fontSize: 18 }, openLabel: { color: COLORS.mintDark, fontFamily: FONT.label, fontSize: 10, letterSpacing: 1 }, similarity: { color: COLORS.mintDark, fontFamily: FONT.label, fontSize: 18 }, copy: { color: COLORS.muted, fontFamily: FONT.body }, error: { color: COLORS.coral, fontFamily: FONT.body },
+  content: { flex: 1, gap: SPACING.md }, header: { alignItems: "flex-start", flexDirection: "row", gap: SPACING.md, marginBottom: SPACING.sm }, headerCopy: { flex: 1, minWidth: 0 }, eyebrow: { color: COLORS.mintDark, fontFamily: FONT.label, fontSize: 11, letterSpacing: 1.3 }, title: { color: COLORS.ink, fontFamily: FONT.display, fontSize: 34, lineHeight: 39, flexShrink: 1 }, intro: { color: COLORS.muted, fontFamily: FONT.body, fontSize: 16 }, entry: { backgroundColor: COLORS.panel, borderColor: COLORS.line, borderRadius: RADIUS.md, borderWidth: 1, gap: SPACING.sm, padding: SPACING.md }, entryPressed: { backgroundColor: COLORS.panelRaised }, entryHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" }, date: { color: COLORS.ink, fontFamily: FONT.display, fontSize: 18 }, openLabel: { color: COLORS.mintDark, fontFamily: FONT.label, fontSize: 10, letterSpacing: 1 }, similarity: { color: COLORS.mintDark, fontFamily: FONT.label, fontSize: 18 }, copy: { color: COLORS.muted, fontFamily: FONT.body }, error: { color: COLORS.coral, fontFamily: FONT.body },
 });

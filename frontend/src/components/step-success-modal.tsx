@@ -107,13 +107,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.successSurface,
   },
   checkMark: {
-    color: COLORS.mint,
+    color: COLORS.mintDark,
     fontFamily: FONT.heavy,
     fontSize: 34,
     lineHeight: 38,
   },
   title: {
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.display,
     fontSize: 22,
     lineHeight: 27,

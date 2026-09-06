@@ -11,6 +11,7 @@ export const COLORS = {
   mintDark: "#007A4F",
   amber: "#F6C78C",
   amberSurface: "#FFF0D7",
+  amberDeep: "#8A4A14",
   coral: "#A43842",
   coralSurface: "#FBE5E7",
   sky: "#A9D6F5",

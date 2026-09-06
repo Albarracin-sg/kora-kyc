@@ -94,10 +94,10 @@ function documentSideLabel(side: KycImageMetadata["side"]): string {
 
 const VERDICT_TONE_COLOR = {
   neutral: COLORS.muted,
-  pending: COLORS.mint,
-  success: COLORS.mint,
+  pending: COLORS.mintDark,
+  success: COLORS.mintDark,
   danger: COLORS.coral,
-  review: COLORS.amber,
+  review: COLORS.amberDeep,
 } as const;
 
 const styles = StyleSheet.create({
@@ -117,14 +117,14 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   cardEyebrow: {
-    color: COLORS.amber,
+    color: COLORS.mintDark,
     fontFamily: FONT.label,
     fontSize: 10,
     letterSpacing: 1.2,
   },
   cardStatus: {
-    color: COLORS.cream,
-    fontFamily: FONT.body,
+    color: COLORS.ink,
+    fontFamily: FONT.label,
     fontSize: 14,
     flexShrink: 1,
     textAlign: "right",

@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { KoraBrand } from "../components/kora-brand";
 import { AuthenticatedScreenShell } from "../components/authenticated-screen-shell";
 import { KycStepIndicator } from "../components/kyc-step-indicator";
-import { PrimaryButton, BUTTON_VARIANT } from "../components/primary-button";
+import { PrimaryButton } from "../components/primary-button";
 import { StatusBadge } from "../components/status-badge";
 import { useAuth } from "../contexts/auth-context";
 import { useKyc } from "../contexts/kyc-context";
@@ -14,7 +14,7 @@ import { COLORS, FONT, RADIUS, SPACING } from "../theme/theme";
 
 export function HomeScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.HOME>): ReactNode {
   const { user } = useAuth();
-  const { verification, isHydrated, isLoading, refresh } = useKyc();
+  const { verification, isHydrated, isLoading } = useKyc();
   const presentation = verification
     ? getKycStatusPresentation(verification.status, verification.reasonCode)
     : {
@@ -26,20 +26,20 @@ export function HomeScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.HOME>
   return (
     <AuthenticatedScreenShell activeRoute={APP_ROUTE.HOME} navigation={navigation}>
       <View style={styles.header}>
-        <View>
+        <View style={styles.headerCopy}>
           <Text style={styles.eyebrow}>PANEL DE IDENTIDAD</Text>
-          <Text style={styles.greeting}>Hola{user ? "," : ""}{"\n"}{user?.email ?? ""}</Text>
+          <Text style={styles.greeting}>Hola{user ? "," : ""}</Text>
+          <Text style={styles.email} numberOfLines={2}>{user?.email ?? ""}</Text>
         </View>
-        <PrimaryButton label="Perfil" onPress={() => navigation.navigate(APP_ROUTE.PROFILE)} variant={BUTTON_VARIANT.GHOST} accessibilityHint="Abre su perfil" />
       </View>
 
       <View style={styles.identityCard}>
         <View style={styles.cardTopRow}>
-          <View>
+          <View style={styles.cardHeading}>
             <Text style={styles.cardEyebrow}>KORA / ESTADO ACTUAL</Text>
             <Text style={styles.cardSection}>Verificación de identidad</Text>
           </View>
-          <KoraBrand showPromise={false} onLight />
+          <KoraBrand markOnly showPromise={false} onLight />
         </View>
         <StatusBadge label={presentation.label} tone={presentation.tone} />
         <Text style={styles.cardTitle}>{presentation.label}</Text>
@@ -52,27 +52,24 @@ export function HomeScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.HOME>
         <Text style={styles.noteTitle}>Un límite claro</Text>
         <Text style={styles.noteCopy}>Kora no realiza detección de vida ni confirma la autenticidad del documento.</Text>
       </View>
-
-      <View style={styles.actions}>
-        <PrimaryButton label={isLoading ? "Actualizando estado" : "Actualizar estado de identidad"} onPress={refresh} disabled={isLoading} variant={BUTTON_VARIANT.GHOST} />
-        <PrimaryButton label="Historial" onPress={() => navigation.navigate(APP_ROUTE.KYC_HISTORY)} variant={BUTTON_VARIANT.GHOST} accessibilityHint="Abre el historial privado de verificaciones" />
-      </View>
     </AuthenticatedScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { alignItems: "flex-start", flexDirection: "row", justifyContent: "space-between", marginBottom: SPACING.xl },
+  header: { alignItems: "flex-start", flexDirection: "row", gap: SPACING.sm, justifyContent: "space-between", marginBottom: SPACING.xl },
+  headerCopy: { flex: 1, minWidth: 0 },
   eyebrow: { color: COLORS.mintDark, fontFamily: FONT.label, fontSize: 11, letterSpacing: 1.3 },
-  greeting: { color: COLORS.ink, fontFamily: FONT.display, fontSize: 30, lineHeight: 35, marginTop: SPACING.xs, maxWidth: 230 },
+  greeting: { color: COLORS.ink, fontFamily: FONT.display, fontSize: 30, lineHeight: 35, marginTop: SPACING.xs },
+  email: { color: COLORS.muted, flexShrink: 1, fontFamily: FONT.body, fontSize: 14, lineHeight: 18, marginTop: 2, maxWidth: 210 },
   identityCard: { backgroundColor: COLORS.mint, borderColor: COLORS.mint, borderRadius: RADIUS.lg, borderWidth: 1, gap: SPACING.md, padding: SPACING.lg },
   cardTopRow: { alignItems: "flex-start", flexDirection: "row", gap: SPACING.sm, justifyContent: "space-between" },
+  cardHeading: { flex: 1, minWidth: 0 },
   cardEyebrow: { color: COLORS.ink, fontFamily: FONT.label, fontSize: 11, letterSpacing: 1.4 },
   cardSection: { color: COLORS.ink, fontFamily: FONT.display, fontSize: 18, marginTop: 2 },
-  cardTitle: { color: COLORS.ink, fontFamily: FONT.display, fontSize: 30, lineHeight: 35 },
-  cardCopy: { color: COLORS.ink, fontFamily: FONT.body, fontSize: 16, lineHeight: 24 },
+  cardTitle: { color: COLORS.ink, fontFamily: FONT.display, fontSize: 28, lineHeight: 33 },
+  cardCopy: { color: COLORS.ink, fontFamily: FONT.body, fontSize: 15, lineHeight: 22 },
   noteCard: { borderLeftColor: COLORS.ink, borderLeftWidth: 2, marginBottom: SPACING.sm, marginTop: SPACING.lg, paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
   noteTitle: { color: COLORS.ink, fontFamily: FONT.label, fontSize: 12, letterSpacing: 1.1, textTransform: "uppercase" },
   noteCopy: { color: COLORS.ink, fontFamily: FONT.body, fontSize: 14, lineHeight: 21, marginTop: SPACING.xs },
-  actions: { backgroundColor: COLORS.ink, borderRadius: RADIUS.lg, gap: SPACING.xs, padding: SPACING.sm },
 });

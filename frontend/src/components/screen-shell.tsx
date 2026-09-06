@@ -21,7 +21,10 @@ export function ScreenShell({ children, footer, scroll = true }: ScreenShellProp
   }, [entranceProgress]);
 
   const content = scroll ? (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      contentContainerStyle={[styles.scrollContent, footer ? styles.scrollContentWithFooter : null]}
+      showsVerticalScrollIndicator={false}
+    >
       {children}
     </ScrollView>
   ) : (
@@ -41,9 +44,9 @@ export function ScreenShell({ children, footer, scroll = true }: ScreenShellProp
           },
         ]}
         >
-          {content}
-        </Animated.View>
-        {footer}
+        {content}
+      </Animated.View>
+      {footer ? <View style={styles.footer}>{footer}</View> : null}
       </SafeAreaView>
   );
 }
@@ -62,10 +65,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.lg,
   },
+  scrollContentWithFooter: {
+    paddingBottom: SPACING.xl,
+  },
   fixedContent: {
     flex: 1,
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.lg,
+  },
+  footer: {
+    paddingBottom: SPACING.xs,
   },
   paperGlow: {
     position: "absolute",

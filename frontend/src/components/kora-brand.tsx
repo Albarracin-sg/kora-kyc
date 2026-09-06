@@ -10,12 +10,13 @@ const BRAND_SIZE = {
 type BrandSize = (typeof BRAND_SIZE)[keyof typeof BRAND_SIZE];
 
 interface KoraBrandProps {
+  markOnly?: boolean;
   size?: BrandSize;
   showPromise?: boolean;
   onLight?: boolean;
 }
 
-export function KoraBrand({ size = BRAND_SIZE.COMPACT, showPromise = true, onLight = false }: KoraBrandProps): ReactNode {
+export function KoraBrand({ markOnly = false, size = BRAND_SIZE.COMPACT, showPromise = true, onLight = false }: KoraBrandProps): ReactNode {
   const isFeature = size === BRAND_SIZE.FEATURE;
 
   return (
@@ -25,10 +26,12 @@ export function KoraBrand({ size = BRAND_SIZE.COMPACT, showPromise = true, onLig
         source={require("../../assets/image.png")}
         style={[styles.mark, isFeature && styles.featureMark]}
       />
-      <View style={styles.copy}>
-        <Text style={[styles.name, isFeature && styles.featureName, onLight && styles.nameOnLight]}>Kora KYC</Text>
-        {showPromise ? <Text style={[styles.promise, onLight && styles.promiseOnLight]}>Verificación de identidad privada, bajo su control.</Text> : null}
-      </View>
+      {markOnly ? null : (
+        <View style={styles.copy}>
+          <Text style={[styles.name, isFeature && styles.featureName, onLight && styles.nameOnLight]}>Kora KYC</Text>
+          {showPromise ? <Text style={[styles.promise, onLight && styles.promiseOnLight]}>Verificación de identidad privada, bajo su control.</Text> : null}
+        </View>
+      )}
     </View>
   );
 }

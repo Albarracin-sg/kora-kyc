@@ -10,7 +10,7 @@ interface AuthenticatedNavigation {
 }
 
 interface AuthenticatedScreenShellProps {
-  activeRoute: typeof APP_ROUTE.HOME | typeof APP_ROUTE.PROFILE;
+  activeRoute: KycFlowRoute;
   children: ReactNode;
   navigation: AuthenticatedNavigation;
 }

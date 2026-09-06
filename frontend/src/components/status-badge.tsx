@@ -29,6 +29,7 @@ export function StatusBadge({ label, tone }: StatusBadgeProps): ReactNode {
 const styles = StyleSheet.create({
   badge: {
     alignSelf: "flex-start",
+    maxWidth: "100%",
     flexDirection: "row",
     alignItems: "center",
     borderRadius: RADIUS.pill,
@@ -42,6 +43,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   label: {
+    flexShrink: 1,
     fontFamily: FONT.label,
     fontSize: 11,
     letterSpacing: 0.9,

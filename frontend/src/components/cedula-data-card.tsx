@@ -90,10 +90,10 @@ export function CedulaDataCard({
 
 const VERDICT_TONE_COLOR = {
   neutral: COLORS.muted,
-  pending: COLORS.mint,
-  success: COLORS.mint,
+  pending: COLORS.mintDark,
+  success: COLORS.mintDark,
   danger: COLORS.coral,
-  review: COLORS.amber,
+  review: COLORS.amberDeep,
 } as const;
 
 function formatDocumentDate(date: string | null): string {

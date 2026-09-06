@@ -5,8 +5,8 @@ import { koraApiClient } from "../services/api-client";
 import { APP_ROUTE, type AppScreenProps } from "../navigation/routes";
 import { KYC_IMAGE_KIND, KYC_STATUS } from "../types/api";
 
-jest.mock("../components/screen-shell", () => ({
-  ScreenShell: ({ children }: { children: ReactNode }) => children,
+jest.mock("../components/authenticated-screen-shell", () => ({
+  AuthenticatedScreenShell: ({ children }: { children: ReactNode }) => children,
 }));
 
 jest.mock("../components/kyc-media-image", () => ({

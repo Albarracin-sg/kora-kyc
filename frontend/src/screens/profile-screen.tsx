@@ -64,11 +64,11 @@ export function ProfileScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.PR
     <AuthenticatedScreenShell activeRoute={APP_ROUTE.PROFILE} navigation={navigation}>
       <View style={styles.content}>
         <View style={styles.header}>
-          <View>
+          <BackToHomeButton navigation={navigation} />
+          <View style={styles.headerCopy}>
             <Text style={styles.eyebrow}>PERFIL / CUENTA</Text>
             <Text style={styles.title}>Su cuenta.</Text>
           </View>
-          <BackToHomeButton navigation={navigation} />
         </View>
 
         <View style={styles.profileCard}>
@@ -99,15 +99,15 @@ export function ProfileScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.PR
         ) : null}
 
         {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-        <View style={styles.actions}>
-           <PrimaryButton label="Volver al centro de identidad" onPress={() => navigation.navigate(APP_ROUTE.HOME)} />
-           <PrimaryButton
-             label={isSigningOut ? "Cerrando sesión" : "Cerrar sesión"}
-            onPress={handleLogout}
-            disabled={isSigningOut}
-            variant={BUTTON_VARIANT.GHOST}
-          />
-        </View>
+         <View style={styles.actions}>
+            <PrimaryButton
+              label={isSigningOut ? "Cerrando sesión" : "Cerrar sesión"}
+             onPress={handleLogout}
+             disabled={isSigningOut}
+             variant={BUTTON_VARIANT.DANGER}
+             accessibilityHint="Cierra su sesión actual"
+           />
+         </View>
       </View>
     </AuthenticatedScreenShell>
   );
@@ -121,7 +121,11 @@ const styles = StyleSheet.create({
   header: {
     alignItems: "flex-start",
     flexDirection: "row",
-    justifyContent: "space-between",
+    gap: SPACING.md,
+  },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   eyebrow: {
     color: COLORS.mint,

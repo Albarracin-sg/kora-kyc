@@ -345,6 +345,7 @@ export function CameraCapture({
               label="Reintentar cámara"
               onPress={handleRetryCamera}
               variant={BUTTON_VARIANT.SECONDARY}
+              compact
               disabled={capturePhase !== CAPTURE_PHASE.IDLE}
               accessibilityHint="Vuelve a iniciar la cámara"
             />
@@ -359,6 +360,8 @@ export function CameraCapture({
             }
             onPress={takePhoto}
             disabled={!canTakePhoto}
+            loading={capturePhase !== CAPTURE_PHASE.IDLE}
+            compact
             accessibilityHint={
               isCameraReady
                 ? "Toma y carga la imagen mostrada por la cámara"
@@ -369,6 +372,7 @@ export function CameraCapture({
             label="Cancelar"
             onPress={onCancel}
             variant={BUTTON_VARIANT.GHOST}
+            compact
             disabled={capturePhase !== CAPTURE_PHASE.IDLE}
           />
         </View>
@@ -436,7 +440,7 @@ const styles = StyleSheet.create({
   },
   selfieFrame: {
     width: "64%",
-    aspectRatio: 0.8,
+    aspectRatio: 0.74,
     borderRadius: RADIUS.pill,
   },
   cameraStatus: {
@@ -473,10 +477,12 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   actions: {
-    backgroundColor: COLORS.ink,
-    borderRadius: RADIUS.lg,
+    backgroundColor: COLORS.panel,
+    borderColor: COLORS.line,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
     gap: SPACING.xs,
-    padding: SPACING.sm,
+    padding: SPACING.xs,
   },
   error: {
     color: COLORS.coral,

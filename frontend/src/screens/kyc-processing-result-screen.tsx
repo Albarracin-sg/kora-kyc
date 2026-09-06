@@ -41,8 +41,8 @@ export function KycProcessingResultScreen(
     return (
       <ScreenShell>
         <View style={styles.emptyState}>
-           <Text style={styles.title}>No hay una verificación de identidad activa.</Text>
-           <PrimaryButton label="Comenzar verificación de identidad" onPress={() => navigation.navigate(APP_ROUTE.START_KYC)} />
+            <Text style={styles.title}>No hay una verificación de identidad activa.</Text>
+            <PrimaryButton label="Comenzar verificación de identidad" onPress={() => navigation.navigate(APP_ROUTE.START_KYC)} />
         </View>
       </ScreenShell>
     );
@@ -95,8 +95,10 @@ export function KycProcessingResultScreen(
     <ScreenShell>
       <View style={styles.content}>
           <View style={styles.header}>
-            <Text style={styles.eyebrow}>VERIFICACIÓN DE IDENTIDAD / RESULTADO</Text>
             <BackToHomeButton navigation={navigation} />
+            <View style={styles.headerCopy}>
+              <Text style={styles.eyebrow}>VERIFICACIÓN DE IDENTIDAD / RESULTADO</Text>
+            </View>
           </View>
          <KycStepIndicator verification={verification} />
         <StatusBadge label={presentation.label} tone={presentation.tone} />
@@ -172,9 +174,13 @@ const styles = StyleSheet.create({
     gap: SPACING.lg,
   },
   header: {
-    alignItems: "center",
+    alignItems: "flex-start",
     flexDirection: "row",
-    justifyContent: "space-between",
+    gap: SPACING.md,
+  },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   eyebrow: {
     color: COLORS.mintDark,
@@ -204,13 +210,13 @@ const styles = StyleSheet.create({
     marginTop: SPACING.md,
   },
   receiptLabel: {
-    color: COLORS.amber,
+    color: COLORS.mintDark,
     fontFamily: FONT.label,
     fontSize: 10,
     letterSpacing: 1.2,
   },
   receiptValue: {
-    color: COLORS.cream,
+    color: COLORS.ink,
     fontFamily: FONT.body,
     fontSize: 14,
     lineHeight: 20,
@@ -221,7 +227,7 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   processingText: {
-    color: COLORS.mint,
+    color: COLORS.muted,
     fontFamily: FONT.body,
     fontSize: 14,
   },

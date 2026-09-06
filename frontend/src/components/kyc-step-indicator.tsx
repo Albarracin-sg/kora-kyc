@@ -172,11 +172,12 @@ const styles = StyleSheet.create({
   },
    segment: {
      width: "100%",
-     height: 10,
+     height: 26,
      borderRadius: RADIUS.pill,
      borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
+    minWidth: 0,
   },
    segmentCompleted: {
     backgroundColor: COLORS.mint,
@@ -193,13 +194,15 @@ const styles = StyleSheet.create({
    number: {
      color: COLORS.ink,
      fontFamily: FONT.button,
+     fontSize: 12,
+     lineHeight: 16,
+   },
+   label: {
+     fontFamily: FONT.label,
      fontSize: 10,
-  },
-  label: {
-    fontFamily: FONT.label,
-    fontSize: 10,
-    textAlign: "center",
-  },
+     flexShrink: 1,
+     textAlign: "center",
+   },
   labelCompleted: {
     color: COLORS.ink,
   },

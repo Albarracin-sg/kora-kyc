@@ -162,9 +162,9 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
   },
   stepNumber: {
-    color: COLORS.amber,
-    fontFamily: FONT.label,
-    fontSize: 14,
+    color: COLORS.ink,
+    fontFamily: FONT.heavy,
+    fontSize: 18,
   },
   stepText: {
     flex: 1,
