@@ -79,7 +79,7 @@ services:
     plan: free
     region: oregon
     rootDir: backend/face-service
-    buildCommand: ./build.sh buffalo_sc
+    buildCommand: ./build.sh buffalo_l
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     # /health is intentionally cheap liveness; Render must route traffic only
     # after the InsightFace analyzer has been preloaded successfully.
@@ -90,7 +90,7 @@ services:
         # Render supports released versions from 3.7.3 onward; use this exact 3.12 release.
         value: "3.12.8"
       - key: INSIGHTFACE_MODEL
-        value: buffalo_sc
+        value: buffalo_l
       - key: INSIGHTFACE_ROOT
         value: /opt/render/project/src/.insightface
       - key: FACE_MATCH_THRESHOLD

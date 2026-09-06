@@ -29,6 +29,7 @@ const CONFIG_DEFAULTS = {
   ocrMinimumConfidence: 0.65,
   jobLockTimeoutMs: 60_000,
   faceMinimumSimilarity: 0.72,
+  faceMinimumBiometricPercent: 30,
   localFaceMaximumDistance: 0.85,
   localFaceMinimumConfidence: 0.65,
   rateLimitEnabled: true,
@@ -121,6 +122,7 @@ export interface AppConfiguration {
   ocrMinimumConfidence: number;
   jobLockTimeoutMs: number;
   faceMinimumSimilarity: number;
+  faceMinimumBiometricPercent: number;
   localFaceMaximumDistance: number;
   localFaceMinimumConfidence: number;
   documentHashPepper: string;
@@ -242,6 +244,24 @@ function readUnitInterval(
   const parsedValue = Number.parseFloat(rawValue);
   if (!Number.isFinite(parsedValue) || parsedValue <= 0 || parsedValue > 1) {
     throw new Error(`Environment variable ${key} must be a number greater than 0 and at most 1`);
+  }
+
+  return parsedValue;
+}
+
+function readPercentage(
+  environment: NodeJS.ProcessEnv,
+  key: string,
+  fallback: number,
+): number {
+  const rawValue = environment[key];
+  if (rawValue === undefined || rawValue.trim() === "") {
+    return fallback;
+  }
+
+  const parsedValue = Number.parseFloat(rawValue);
+  if (!Number.isFinite(parsedValue) || parsedValue < 0 || parsedValue > 100) {
+    throw new Error(`Environment variable ${key} must be a number between 0 and 100`);
   }
 
   return parsedValue;
@@ -559,6 +579,11 @@ export function createAppConfiguration(
       environment,
       "KYC_FACE_MIN_SIMILARITY",
       CONFIG_DEFAULTS.faceMinimumSimilarity,
+    ),
+    faceMinimumBiometricPercent: readPercentage(
+      environment,
+      "KYC_FACE_MIN_BIOMETRIC_PERCENT",
+      CONFIG_DEFAULTS.faceMinimumBiometricPercent,
     ),
     localFaceMaximumDistance: readUnitInterval(
       environment,

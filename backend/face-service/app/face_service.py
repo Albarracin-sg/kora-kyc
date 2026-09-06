@@ -35,6 +35,7 @@ IMAGE_KIND = {
     "SELFIE": "selfie",
 }
 DOCUMENT_ORIENTATION_DEGREES = (0, 90, 180, 270)
+DOCUMENT_DETECTION_SCALE_FACTORS = (1.0, 1.5, 2.0)
 
 # --- Pure helpers (dependency-light, unit-testable) ---
 
@@ -258,36 +259,77 @@ def _assess_orientation(
     *,
     blur_threshold: float,
     min_face_width_px: int,
+    image_kind: str,
 ) -> ImageAssessment:
     oriented_image = image_bgr
+    temporary_images: list[Any] = []
     try:
         oriented_image = rotate_image(image_bgr, orientation_degrees)
-        faces = model.get(oriented_image) if model is not None else []
-        best = select_best_face(faces)
-        variance = compute_laplacian_variance(oriented_image)
-        if best is None:
-            verdict = evaluate_face_quality(
-                face_detected=False,
-                laplacian_variance=variance,
-                blur_threshold=blur_threshold,
-                min_face_width_px=min_face_width_px,
-            )
-            return ImageAssessment(verdict, None, orientation_degrees)
-        verdict = evaluate_face_quality(
-            face_detected=True,
-            face_width_px=face_width_px(best),
-            laplacian_variance=variance,
-            blur_threshold=blur_threshold,
-            min_face_width_px=min_face_width_px,
+        scale_factors = (
+            DOCUMENT_DETECTION_SCALE_FACTORS
+            if image_kind == IMAGE_KIND["DOCUMENT"]
+            else (1.0,)
         )
-        return ImageAssessment(verdict, best, orientation_degrees)
+        assessments: list[ImageAssessment] = []
+        for scale_factor in scale_factors:
+            candidate = _scale_for_document_detection(oriented_image, scale_factor)
+            if candidate is not oriented_image:
+                temporary_images.append(candidate)
+            faces = model.get(candidate) if model is not None else []
+            best = select_best_face(faces)
+            variance = compute_laplacian_variance(candidate)
+            if best is None:
+                verdict = evaluate_face_quality(
+                    face_detected=False,
+                    laplacian_variance=variance,
+                    blur_threshold=blur_threshold,
+                    min_face_width_px=min_face_width_px,
+                )
+            else:
+                verdict = evaluate_face_quality(
+                    face_detected=True,
+                    face_width_px=face_width_px(best),
+                    laplacian_variance=variance,
+                    blur_threshold=blur_threshold,
+                    min_face_width_px=min_face_width_px,
+                )
+            assessments.append(ImageAssessment(verdict, best, orientation_degrees))
+
+        return max(assessments, key=lambda assessment: _assessment_rank(assessment, 0))
     except Exception:
         return ImageAssessment(error_verdict(), None, orientation_degrees)
     finally:
         # Face objects retain the embedding and geometry needed by the caller;
         # the temporary rotated pixel buffer is no longer needed.
+        for temporary_image in temporary_images:
+            del temporary_image
         if oriented_image is not image_bgr:
             del oriented_image
+
+
+def _scale_for_document_detection(image_bgr: Any, scale_factor: float) -> Any:
+    """Upscale small document portraits so the detector gets a second chance."""
+    if scale_factor <= 1.0 or not hasattr(image_bgr, "shape"):
+        return image_bgr
+    try:
+        import cv2
+
+        height, width = image_bgr.shape[:2]
+        if height <= 0 or width <= 0:
+            return image_bgr
+        max_dimension = 4096
+        effective_scale = min(scale_factor, max_dimension / max(height, width))
+        if effective_scale <= 1.0:
+            return image_bgr
+        return cv2.resize(
+            image_bgr,
+            None,
+            fx=effective_scale,
+            fy=effective_scale,
+            interpolation=cv2.INTER_CUBIC,
+        )
+    except Exception:
+        return image_bgr
 
 
 def assess_image_with_orientation(
@@ -313,6 +355,7 @@ def assess_image_with_orientation(
             orientation_degrees,
             blur_threshold=blur_threshold,
             min_face_width_px=min_face_width_px,
+            image_kind=image_kind,
         )
         for orientation_degrees in candidates
     ]

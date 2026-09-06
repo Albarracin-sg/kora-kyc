@@ -229,6 +229,16 @@ export class KycService {
     return this.uploadImage(user, KYC_IMAGE_KIND.SELFIE, upload, null);
   }
 
+  async uploadSelfieCandidates(
+    user: AuthenticatedUser,
+    uploads: Buffer[],
+  ): Promise<KycPublicVerification> {
+    if (uploads.length < 2 || uploads.length > 3) {
+      throw new BadRequestException("Selfie candidate count must be between 2 and 3");
+    }
+    return this.uploadImageCandidates(user, KYC_IMAGE_KIND.SELFIE, uploads, null);
+  }
+
   async verify(user: AuthenticatedUser): Promise<KycPublicVerification> {
     const verification = await this.findCurrentVerification(user.id);
     if (!verification) {
@@ -500,10 +510,11 @@ export class KycService {
         if (kind === KYC_IMAGE_KIND.DOCUMENT && side) {
           await transaction.kycImage.upsert({
             where: {
-              verificationId_kind_side: {
+              verificationId_kind_side_captureIndex: {
                 verificationId: current.id,
                 kind,
                 side,
+                captureIndex: 0,
               },
             },
             create: {
@@ -516,6 +527,8 @@ export class KycService {
               width: normalizedImage.width,
               height: normalizedImage.height,
               sha256: normalizedImage.sha256,
+              captureIndex: 0,
+              selectedForVerification: true,
             },
             update: {
               storageKey,
@@ -524,11 +537,13 @@ export class KycService {
               width: normalizedImage.width,
               height: normalizedImage.height,
               sha256: normalizedImage.sha256,
+              captureIndex: 0,
+              selectedForVerification: true,
             },
           });
         } else {
           const existingSelfie = current.images.find(
-            (image) => image.kind === kind && image.side === null,
+            (image) => image.kind === kind && image.side === null && image.captureIndex === 0,
           );
           await transaction.kycImage.upsert({
             where: { id: existingSelfie?.id ?? "" },
@@ -542,6 +557,8 @@ export class KycService {
               width: normalizedImage.width,
               height: normalizedImage.height,
               sha256: normalizedImage.sha256,
+              captureIndex: 0,
+              selectedForVerification: true,
             },
             update: {
               storageKey,
@@ -550,6 +567,8 @@ export class KycService {
               width: normalizedImage.width,
               height: normalizedImage.height,
               sha256: normalizedImage.sha256,
+              captureIndex: 0,
+              selectedForVerification: true,
             },
           });
         }
@@ -581,6 +600,88 @@ export class KycService {
         await this.removeStoredImageWithoutMaskingSuccess(storageKey);
       }
 
+      throw error;
+    }
+  }
+
+  private async uploadImageCandidates(
+    user: AuthenticatedUser,
+    kind: KycImageKind,
+    uploads: Buffer[],
+    side: DocumentSide | null,
+  ): Promise<KycPublicVerification> {
+    const verification = await this.findCurrentVerification(user.id);
+    if (!verification) {
+      throw new NotFoundException("Start a KYC verification before uploading an image");
+    }
+
+    this.assertVerificationHasRemoteBiometricConsent(verification);
+    this.assertUploadAllowed(verification.status as KycStatus, kind);
+
+    const normalizedImages = await Promise.all(
+      uploads.map((upload) => this.imageNormalizationService.normalize(upload)),
+    );
+    const storedKeys: string[] = [];
+    const oldKeys = verification.images
+      .filter((image) => image.kind === kind && image.side === side)
+      .map((image) => image.storageKey);
+
+    try {
+      for (const normalizedImage of normalizedImages) {
+        const storageKey = `${user.id}/${verification.id}/selfie/${randomUUID()}.jpg`;
+        await this.fileStorage.write({ key: storageKey, body: normalizedImage.buffer });
+        storedKeys.push(storageKey);
+      }
+
+      const updatedVerification = await this.prismaService.$transaction(async (transaction) => {
+        const current = await transaction.kycVerification.findFirst({
+          where: { id: verification.id, userId: user.id },
+          include: { images: true },
+        });
+        if (!current) {
+          throw new NotFoundException("KYC verification is no longer available");
+        }
+        this.assertUploadAllowed(current.status as KycStatus, kind);
+
+        await transaction.kycImage.deleteMany({
+          where: { verificationId: current.id, kind, side },
+        });
+        await transaction.kycImage.createMany({
+          data: normalizedImages.map((normalizedImage, captureIndex) => {
+            const storageKey = storedKeys[captureIndex];
+            if (!storageKey) {
+              throw new Error("A normalized selfie candidate is missing its storage key");
+            }
+
+            return {
+            verificationId: current.id,
+            kind,
+            side,
+            storageKey,
+            mimeType: normalizedImage.mimeType,
+            byteSize: normalizedImage.byteSize,
+            width: normalizedImage.width,
+            height: normalizedImage.height,
+            sha256: normalizedImage.sha256,
+            captureIndex,
+            selectedForVerification: captureIndex === 0,
+            };
+          }),
+        });
+
+        return transaction.kycVerification.update({
+          where: { id: current.id },
+          data: {
+            status: KYC_STATUS.SELFIE_UPLOADED,
+          },
+          include: { images: true },
+        });
+      });
+
+      await Promise.all(oldKeys.map((storageKey) => this.removeStoredImageWithoutMaskingSuccess(storageKey)));
+      return this.toPublicVerification(updatedVerification);
+    } catch (error: unknown) {
+      await Promise.all(storedKeys.map((storageKey) => this.removeStoredImageWithoutMaskingSuccess(storageKey)));
       throw error;
     }
   }
@@ -783,7 +884,7 @@ export class KycService {
       backPresent: verification.backPresent,
       createdAt: verification.createdAt,
       updatedAt: verification.updatedAt,
-      images: verification.images.map((image) => ({
+       images: verification.images.filter((image) => image.selectedForVerification).map((image) => ({
         id: image.id,
         kind: image.kind as KycImageKind,
         side: (image.side as DocumentSide) ?? null,

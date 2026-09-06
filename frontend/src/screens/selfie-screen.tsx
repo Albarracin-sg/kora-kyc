@@ -6,11 +6,11 @@ import { useKyc } from "../contexts/kyc-context";
 import { APP_ROUTE, type AppScreenProps } from "../navigation/routes";
 
 export function SelfieScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.SELFIE>): ReactNode {
-  const { verification, uploadSelfie } = useKyc();
+  const { verification, uploadSelfieCandidates } = useKyc();
   const [isSuccessVisible, setIsSuccessVisible] = useState(false);
 
-  async function handleCapture(uri: string): Promise<void> {
-    await uploadSelfie(uri);
+  async function handleCaptureCandidates(uris: string[]): Promise<void> {
+    await uploadSelfieCandidates(uris);
     setIsSuccessVisible(true);
   }
 
@@ -28,7 +28,9 @@ export function SelfieScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.SEL
         detail="Use una iluminación uniforme. Kora no realiza comprobaciones de vida ni ofrece garantías de seguridad biométrica."
         facing="front"
         frameShape="selfie"
-        onCapture={handleCapture}
+        onCapture={() => Promise.resolve()}
+        onCaptureCandidates={handleCaptureCandidates}
+        captureCount={3}
         onCancel={() => navigation.navigate(APP_ROUTE.HOME)}
         indicator={<KycStepIndicator verification={verification} />}
       />

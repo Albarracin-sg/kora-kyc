@@ -105,6 +105,49 @@ const NON_CEDULA_PRESENTATIONS: Record<string, KycStatusPresentation> = {
   },
 };
 
+const FACE_QUALITY_PRESENTATIONS: Record<string, KycStatusPresentation> = {
+  FACE_CAPTURE_QUALITY_DOCUMENT_NO_FACE: {
+    label: "No detectamos el rostro de la cédula",
+    description: "Asegúrate de subir el frente completo, con buena luz y sin reflejos sobre la fotografía.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  FACE_CAPTURE_QUALITY_DOCUMENT_FACE_RESOLUTION_TOO_SMALL: {
+    label: "El rostro de la cédula es muy pequeño",
+    description: "Acerca la cámara y captura el frente completo sin recortar la tarjeta.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  FACE_CAPTURE_QUALITY_DOCUMENT_BLURRY: {
+    label: "La cédula está borrosa",
+    description: "Limpia el lente, usa buena iluminación y mantén el teléfono quieto.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  FACE_CAPTURE_QUALITY_SELFIE_NO_FACE: {
+    label: "No detectamos tu rostro",
+    description: "Mira de frente a la cámara y asegúrate de que tu rostro completo esté dentro del marco.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  FACE_CAPTURE_QUALITY_SELFIE_FACE_RESOLUTION_TOO_SMALL: {
+    label: "Tu rostro aparece muy pequeño",
+    description: "Acércate un poco y mantén la cara centrada dentro del marco.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  FACE_CAPTURE_QUALITY_SELFIE_BLURRY: {
+    label: "La selfie está borrosa",
+    description: "Usa iluminación uniforme, limpia el lente y mantén el teléfono quieto.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  FACE_BIOMETRIC_BELOW_MINIMUM: {
+    label: "La comparación biométrica no fue concluyente",
+    description: "La señal biométrica quedó por debajo del mínimo independiente. Se requiere revisión adicional.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+  FACE_AI_COMPARISON_UNAVAILABLE: {
+    label: "La validación facial quedó incompleta",
+    description: "No se pudo obtener una señal válida de ambos verificadores. Intenta la validación nuevamente.",
+    tone: KYC_STATUS_TONE.REVIEW,
+  },
+};
+
 const FACE_CAPTURE_QUALITY_PRESENTATIONS: Record<
   KycFaceCaptureFailure,
   KycStatusPresentation
@@ -214,6 +257,10 @@ export function getKycStatusPresentation(
 
   if (reasonCode && NON_CEDULA_PRESENTATIONS[reasonCode]) {
     return NON_CEDULA_PRESENTATIONS[reasonCode];
+  }
+
+  if (reasonCode && FACE_QUALITY_PRESENTATIONS[reasonCode]) {
+    return FACE_QUALITY_PRESENTATIONS[reasonCode];
   }
 
   return STATUS_PRESENTATIONS[status];

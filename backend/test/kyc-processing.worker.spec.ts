@@ -38,6 +38,7 @@ import {
 } from "../src/kyc/providers/hugging-face-document-extraction.provider";
 import type { DocumentExtractionProvider } from "../src/kyc/providers/document-extraction.provider";
 import { DOCUMENT_PARSE_OUTCOME } from "../src/kyc/providers/document-extraction.provider";
+import type { FaceAiVerificationProvider } from "../src/kyc/providers/face-ai-verification.provider";
 import {
   FACE_CAPTURE_FAILURE_CODE,
   FaceCaptureError,
@@ -50,6 +51,7 @@ import type { PrismaService } from "../src/prisma/prisma.service";
 interface TransactionSpy {
   kycProcessingJob: { updateMany: jest.Mock };
   kycVerification: { updateMany: jest.Mock };
+  kycImage: { updateMany: jest.Mock; update: jest.Mock };
 }
 
 function createVerification(): KycVerification {
@@ -108,14 +110,17 @@ function createJob(): KycProcessingJob & { lockToken: string } {
 }
 
 interface WorkerHarnessImage {
+  id?: string;
   kind: string;
   side: string | null;
   storageKey: string;
+  captureIndex?: number;
 }
 
 interface WorkerHarnessOptions {
   images?: WorkerHarnessImage[];
   faceVerify?: jest.Mock;
+  faceAiVerify?: jest.Mock;
   documentProvider?: KycDocumentProvider;
   faceVerificationProvider?: FaceVerificationProviderName;
   verification?: Partial<KycVerification>;
@@ -132,6 +137,10 @@ function createWorker(
   const transaction: TransactionSpy = {
     kycProcessingJob: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     kycVerification: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    kycImage: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      update: jest.fn().mockResolvedValue({}),
+    },
   };
   const prismaService = {
     kycVerification: {
@@ -145,7 +154,13 @@ function createWorker(
           ],
       }),
     },
-    $transaction: jest.fn(async (callback: (tx: TransactionSpy) => Promise<void>) => callback(transaction)),
+    kycImage: transaction.kycImage,
+    $transaction: jest.fn(async (operation: unknown) => {
+      if (Array.isArray(operation)) {
+        return Promise.all(operation);
+      }
+      return (operation as (tx: TransactionSpy) => Promise<void>)(transaction);
+    }),
   } as unknown as PrismaService;
   const documentProvider: DocumentExtractionProvider = {
     audit: { provider: "test", model: "test" },
@@ -158,6 +173,7 @@ function createWorker(
     values: {
       ocrMinimumConfidence: 0.8,
       faceMinimumSimilarity: 0.72,
+      faceMinimumBiometricPercent: 30,
       documentProvider: options.documentProvider ?? KYC_DOCUMENT_PROVIDER.LOCAL,
       faceVerificationProvider:
         options.faceVerificationProvider ?? FACE_VERIFICATION_PROVIDER.LOCAL,
@@ -170,7 +186,10 @@ function createWorker(
       configService,
       fileStorage,
       documentProvider,
-      faceProvider,
+    faceProvider,
+      options.faceAiVerify
+        ? ({ verify: options.faceAiVerify } as FaceAiVerificationProvider)
+        : null,
     ),
     transaction,
   };
@@ -581,6 +600,63 @@ describe("KycProcessingWorker document profile persistence", () => {
     );
   });
 
+  it("selects the highest biometric selfie and reuses that buffer for AI verification", async () => {
+    const documentBuffer = Buffer.from("document");
+    const selfieBuffers = [Buffer.from("selfie-one"), Buffer.from("selfie-two"), Buffer.from("selfie-three")];
+    const buffers = new Map([
+      ["document-key", documentBuffer],
+      ["document-back-key", Buffer.from("document-back")],
+      ["selfie-one", selfieBuffers[0]],
+      ["selfie-two", selfieBuffers[1]],
+      ["selfie-three", selfieBuffers[2]],
+    ]);
+    const fileStorage = {
+      read: jest.fn(async (storageKey: string) => {
+        const buffer = buffers.get(storageKey);
+        if (!buffer) throw new Error(`Missing test buffer: ${storageKey}`);
+        return buffer;
+      }),
+    } as unknown as FileStorage;
+    const faceVerify = jest
+      .fn()
+      .mockResolvedValueOnce({ documentFaceCount: 1, selfieFaceCount: 1, distance: 0.3, similarity: 0.74, accepted: true })
+      .mockResolvedValueOnce({ documentFaceCount: 1, selfieFaceCount: 1, distance: 0.1, similarity: 0.93, accepted: true })
+      .mockResolvedValueOnce({ documentFaceCount: 1, selfieFaceCount: 1, distance: 0.2, similarity: 0.81, accepted: true });
+    const faceAiVerify = jest.fn().mockResolvedValue({
+      verdict: "same_person",
+      similarityPercent: 92,
+      summary: "The faces are consistent.",
+      provider: "test-ai",
+      model: "test-model",
+    });
+    const { worker, transaction } = createWorker(
+      fileStorage,
+      jest.fn().mockResolvedValue(VALID_EXTRACTION),
+      {
+        faceVerify,
+        faceAiVerify,
+        images: [
+          { id: "document-id", kind: "DOCUMENT", side: "FRONT", storageKey: "document-key", captureIndex: 0 },
+          { id: "document-back-id", kind: "DOCUMENT", side: "BACK", storageKey: "document-back-key", captureIndex: 0 },
+          { id: "selfie-one-id", kind: "SELFIE", side: null, storageKey: "selfie-one", captureIndex: 0 },
+          { id: "selfie-two-id", kind: "SELFIE", side: null, storageKey: "selfie-two", captureIndex: 1 },
+          { id: "selfie-three-id", kind: "SELFIE", side: null, storageKey: "selfie-three", captureIndex: 2 },
+        ],
+      },
+    );
+
+    await worker["processJob"](createJob());
+
+    expect(faceVerify).toHaveBeenNthCalledWith(1, documentBuffer, selfieBuffers[0]);
+    expect(faceVerify).toHaveBeenNthCalledWith(2, documentBuffer, selfieBuffers[1]);
+    expect(faceVerify).toHaveBeenNthCalledWith(3, documentBuffer, selfieBuffers[2]);
+    expect(faceAiVerify).toHaveBeenCalledWith(documentBuffer, selfieBuffers[1]);
+    expect(transaction.kycImage.update).toHaveBeenCalledWith({
+      where: { id: "selfie-two-id" },
+      data: { selectedForVerification: true },
+    });
+  });
+
   it("persists the typed profile fields and the verdict on a face-capture failure", async () => {
     const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
     const faceVerify = jest.fn().mockRejectedValue(
@@ -673,8 +749,8 @@ describe("KycProcessingWorker document profile persistence", () => {
     expect(transaction.kycVerification.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          status: KYC_STATUS.REJECTED,
-          rejectionCode: "FACE_SIMILARITY_BELOW_THRESHOLD",
+          status: KYC_STATUS.NEEDS_REVIEW,
+          rejectionCode: "FACE_BIOMETRIC_BELOW_MINIMUM",
           faceDistance: 0.8,
           faceSimilarity: 0.05,
         }),

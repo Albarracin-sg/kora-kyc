@@ -56,7 +56,9 @@ interface CameraCaptureProps {
   detail: string;
   facing: CameraType;
   frameShape: "document" | "selfie";
-  onCapture(uri: string): Promise<void>;
+  onCapture?(uri: string): Promise<void>;
+  onCaptureCandidates?(uris: string[]): Promise<void>;
+  captureCount?: number;
   onCancel(): void;
   indicator?: ReactNode;
 }
@@ -105,6 +107,8 @@ export function CameraCapture({
   facing,
   frameShape,
   onCapture,
+  onCaptureCandidates,
+  captureCount = 3,
   onCancel,
   indicator,
 }: CameraCaptureProps): ReactNode {
@@ -135,9 +139,19 @@ export function CameraCapture({
     logCameraEvent(CAMERA_EVENT.CAPTURE_STARTED, { facing, frameShape });
 
     try {
-      let capturedUri: string | null;
+      let capturedUris: string[] = [];
       try {
-        capturedUri = await capturePhoto(camera);
+        const totalCaptures = onCaptureCandidates ? captureCount : 1;
+        for (let index = 0; index < totalCaptures; index += 1) {
+          const capturedUri = await capturePhoto(camera);
+          if (!capturedUri) {
+            throw new Error("missing_capture_uri");
+          }
+          capturedUris.push(capturedUri);
+          if (index < totalCaptures - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 180));
+          }
+        }
       } catch (captureError: unknown) {
         logCameraEvent(CAMERA_EVENT.CAPTURE_FAILED, {
           reason: "camera_error",
@@ -147,18 +161,17 @@ export function CameraCapture({
         return;
       }
 
-      if (!capturedUri) {
-        logCameraEvent(CAMERA_EVENT.CAPTURE_FAILED, {
-          reason: "missing_uri",
-          errorName: "InvalidCaptureResult",
-        });
-        setError("La cámara no devolvió una imagen válida. Ajuste el encuadre e inténtelo de nuevo.");
-        return;
-      }
-
       setCapturePhase(CAPTURE_PHASE.UPLOADING);
       try {
-        await onCapture(capturedUri);
+        if (onCaptureCandidates) {
+          await onCaptureCandidates(capturedUris);
+        } else if (onCapture) {
+          const capturedUri = capturedUris[0];
+          if (!capturedUri) {
+            throw new Error("missing_capture_uri");
+          }
+          await onCapture(capturedUri);
+        }
       } catch (uploadError: unknown) {
         const apiErrorMetadata = getApiRequestLogMetadata(uploadError);
         logCameraEvent(CAMERA_EVENT.UPLOAD_FAILED, {

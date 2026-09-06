@@ -81,6 +81,8 @@ function imageRow(overrides: Partial<KycImage> = {}): KycImage {
     width: 800,
     height: 600,
     sha256: "stored-hash",
+    captureIndex: 0,
+    selectedForVerification: true,
     createdAt: new Date("2026-09-04T00:00:00.000Z"),
     ...overrides,
   };

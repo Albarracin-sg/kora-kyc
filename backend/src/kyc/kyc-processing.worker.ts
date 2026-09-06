@@ -278,12 +278,14 @@ export class KycProcessingWorker {
       return;
     }
 
-    const selfieImage = verification.images.find((image) => image.kind === KYC_IMAGE_KIND.SELFIE);
+    const selfieImages = verification.images
+      .filter((image) => image.kind === KYC_IMAGE_KIND.SELFIE)
+      .sort((left, right) => left.captureIndex - right.captureIndex);
     const documentImages = verification.images.filter(
       (image) => image.kind === KYC_IMAGE_KIND.DOCUMENT,
     );
 
-    if (!selfieImage) {
+    if (selfieImages.length === 0) {
       await this.complete(job, verification, this.processingFailedOutcome("SELFIE_IMAGE_MISSING"));
       return;
     }
@@ -306,9 +308,14 @@ export class KycProcessingWorker {
       return;
     }
 
-    let selfieBuffer: Buffer;
+    let selfieBuffers: Array<{ imageId: string; buffer: Buffer }>;
     try {
-      selfieBuffer = await this.fileStorage.read(selfieImage.storageKey);
+      selfieBuffers = await Promise.all(
+        selfieImages.map(async (image) => ({
+          imageId: image.id,
+          buffer: await this.fileStorage.read(image.storageKey),
+        })),
+      );
     } catch {
       await this.completeStageFailure(
         job,
@@ -396,10 +403,38 @@ export class KycProcessingWorker {
       return;
     }
 
+    const firstSelfieBuffer = selfieBuffers[0];
+    if (!firstSelfieBuffer) {
+      await this.complete(job, verification, this.processingFailedOutcome("SELFIE_IMAGE_MISSING"));
+      return;
+    }
+    let selectedSelfieBuffer = firstSelfieBuffer.buffer;
+    let selectedSelfieImageId = firstSelfieBuffer.imageId;
+    let faceResult: FaceVerificationResult | null = null;
+    let faceComparisonError: unknown = null;
+    for (const selfieCandidate of selfieBuffers) {
+      try {
+        const candidateResult = await this.faceVerificationProvider.verify(
+          faceImageBuffer,
+          selfieCandidate.buffer,
+        );
+        if (faceResult === null || candidateResult.similarity > faceResult.similarity) {
+          faceResult = candidateResult;
+          selectedSelfieBuffer = selfieCandidate.buffer;
+          selectedSelfieImageId = selfieCandidate.imageId;
+        }
+      } catch (error: unknown) {
+        faceComparisonError ??= error;
+      }
+    }
+
     let faceAiResult: FaceAiVerificationResult | null = null;
     if (this.faceAiVerificationProvider) {
       try {
-        faceAiResult = await this.faceAiVerificationProvider.verify(faceImageBuffer, selfieBuffer);
+        faceAiResult = await this.faceAiVerificationProvider.verify(
+          faceImageBuffer,
+          selectedSelfieBuffer,
+        );
       } catch {
         this.logger.warn(
           JSON.stringify({
@@ -412,7 +447,23 @@ export class KycProcessingWorker {
     }
 
     try {
-      const faceResult = await this.faceVerificationProvider.verify(faceImageBuffer, selfieBuffer);
+      if (faceResult === null) {
+        throw faceComparisonError ?? new Error("No selfie candidate could be compared");
+      }
+      await this.prismaService.$transaction([
+        this.prismaService.kycImage.updateMany({
+          where: {
+            verificationId: verification.id,
+            kind: KYC_IMAGE_KIND.SELFIE,
+            side: null,
+          },
+          data: { selectedForVerification: false },
+        }),
+        this.prismaService.kycImage.update({
+          where: { id: selectedSelfieImageId },
+          data: { selectedForVerification: true },
+        }),
+      ]);
       const faceOutcome = this.evaluateFace(faceResult, extractedDocument, faceAiResult);
       await this.complete(job, verification, this.withFaceAiResult(faceOutcome, faceAiResult));
     } catch (error: unknown) {
@@ -737,6 +788,8 @@ export class KycProcessingWorker {
     const biometricPercent = Math.max(0, Math.min(100, faceResult.similarity * 100));
     const aiPercent = faceAiResult?.similarityPercent ?? null;
     const combinedPercent = aiPercent === null ? null : (biometricPercent + aiPercent) / 2;
+    const passesBiometricFloor =
+      biometricPercent >= this.configService.values.faceMinimumBiometricPercent;
     const hasConfiguredAiProvider = this.faceAiVerificationProvider !== null;
     const hasCompleteComparison = combinedPercent !== null && Number.isFinite(combinedPercent);
     const combinedVerdict = hasCompleteComparison
@@ -744,6 +797,23 @@ export class KycProcessingWorker {
         ? "same_person"
         : "different_person"
       : "needs_review";
+
+    if (!passesBiometricFloor) {
+      return {
+        status: KYC_STATUS.NEEDS_REVIEW,
+        reasonCode: "FACE_BIOMETRIC_BELOW_MINIMUM",
+        documentType: parsedDocument.documentType,
+        documentNumberHash,
+        ...this.documentProfileFields(extraction),
+        documentOcrConfidence: extraction.confidence,
+        documentProvider: extraction.audit.provider,
+        documentProviderModel: extraction.audit.model,
+        faceDistance: faceResult.distance,
+        faceSimilarity: faceResult.similarity,
+        faceCombinedSimilarityPercent: combinedPercent,
+        faceCombinedVerdict: "needs_review",
+      };
+    }
 
     if (hasConfiguredAiProvider && !hasCompleteComparison) {
       return {

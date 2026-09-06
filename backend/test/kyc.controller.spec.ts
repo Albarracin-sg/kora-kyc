@@ -16,6 +16,7 @@ jest.mock("@nestjs/common", () => ({
   Query: decorator,
   StreamableFile: class StreamableFile {},
   UploadedFile: decorator,
+  UploadedFiles: decorator,
   UseGuards: decorator,
   UseInterceptors: decorator,
   createParamDecorator: () => decorator,
@@ -23,6 +24,7 @@ jest.mock("@nestjs/common", () => ({
 
 jest.mock("@nestjs/platform-express", () => ({
   FileInterceptor: jest.fn(() => class FileInterceptor {}),
+  FilesInterceptor: jest.fn(() => class FilesInterceptor {}),
 }));
 
 jest.mock("@nestjs/passport", () => ({

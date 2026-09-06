@@ -256,9 +256,9 @@ function prepareUploadUri(uri: string): string {
   return normalizedUri;
 }
 
-function appendReactNativeImagePart(formData: FormData, uri: string): void {
+function appendReactNativeImagePart(formData: FormData, uri: string, fieldName = "image"): void {
   const reactNativeFormData = formData as unknown as FormData & ReactNativeFormDataAppend;
-  reactNativeFormData.append("image", {
+  reactNativeFormData.append(fieldName, {
     uri,
     name: UPLOAD_FILE_NAME,
     type: UPLOAD_MIME_TYPE,
@@ -669,6 +669,17 @@ export class KoraApiClient {
 
   async uploadSelfie(uri: string): Promise<KycVerification> {
     return this.uploadImage("/kyc/selfie", uri);
+  }
+
+  async uploadSelfieCandidates(uris: string[]): Promise<KycVerification> {
+    const payload = new FormData();
+    for (const uri of uris) {
+      appendReactNativeImagePart(payload, uri, "images");
+    }
+    return this.request<KycVerification>("/kyc/selfie/candidates", {
+      method: "POST",
+      body: payload,
+    });
   }
 
   async verifyKyc(): Promise<KycVerification> {

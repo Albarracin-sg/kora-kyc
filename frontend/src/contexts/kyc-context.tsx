@@ -12,6 +12,7 @@ interface KycContextValue {
   getConsentRequirements(): Promise<KycConsentRequirements>;
   uploadDocument(uri: string, side: DocumentSide): Promise<KycVerification>;
   uploadSelfie(uri: string): Promise<KycVerification>;
+  uploadSelfieCandidates(uris: string[]): Promise<KycVerification>;
   verify(): Promise<KycVerification>;
 }
 
@@ -87,6 +88,13 @@ export function KycProvider({ children }: KycProviderProps): ReactNode {
     return nextVerification;
   }
 
+  async function uploadSelfieCandidates(uris: string[]): Promise<KycVerification> {
+    requireToken();
+    const nextVerification = await koraApiClient.uploadSelfieCandidates(uris);
+    setVerification(nextVerification);
+    return nextVerification;
+  }
+
   async function verify(): Promise<KycVerification> {
     requireToken();
     const nextVerification = await koraApiClient.verifyKyc();
@@ -103,6 +111,7 @@ export function KycProvider({ children }: KycProviderProps): ReactNode {
     getConsentRequirements,
     uploadDocument,
     uploadSelfie,
+    uploadSelfieCandidates,
     verify,
   };
 

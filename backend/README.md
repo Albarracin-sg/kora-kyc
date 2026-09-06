@@ -1,167 +1,302 @@
 # Backend Kora KYC
 
-API NestJS para el MVP KYC, con Prisma, PostgreSQL, almacenamiento privado de imágenes, proveedor documental configurable y comparación facial configurable (local o `face_service`).
+Backend NestJS que concentra toda la autoridad de la verificación: autenticación,
+transición de estados, validación de archivos, almacenamiento privado,
+selección de proveedores, procesamiento asíncrono, persistencia e historial.
 
-## Arquitectura
+## Objetivo arquitectónico
 
-Dos aplicaciones independientes: `backend/` (API NestJS con Prisma y PostgreSQL; autoridad para autenticación, transición de estados KYC, validación, persistencia y almacenamiento privado de imágenes) y `frontend/` (app Expo que captura documento y selfie con permiso explícito, consume la API y presenta el estado; sin reglas de decisión ni secretos). La infraestructura se conserva en `backend/infra/`.
+El backend se diseñó como un límite de confianza único. El frontend no decide
+si una persona coincide, no conoce las claves de OpenCode/B2/PostgreSQL y no
+interpreta directamente los estados internos. Todas las decisiones relevantes
+se toman aquí y quedan asociadas a una verificación persistida.
 
-El flujo KYC es `CREATED` → `DOCUMENT_UPLOADED` → `SELFIE_UPLOADED` → `VALIDATING` y concluye en `APPROVED`, `REJECTED`, `NEEDS_REVIEW` o `PROCESSING_FAILED` (terminales). Todas las decisiones siguen el comportamiento fail-closed: ante assets faltantes, comprobación de integridad fallida, respuesta inválida del proveedor o imagen no procesable, el resultado nunca aprueba por degradación.
+```text
+HTTP Controller
+      ↓
+KycService / Auth
+      ↓
+Prisma + FileStoragePort
+      ↓
+KycProcessingWorker
+      ├── DocumentExtractionProvider
+      ├── FaceAiVerificationProvider
+      └── FaceVerificationProvider
+```
 
-Los proveedores se seleccionan por variables de entorno:
+## Comandos
 
-- **Documental** (`KYC_DOCUMENT_PROVIDER`): `gemini` (predeterminado), `huggingface` (explícito) o `local` (sólo desarrollo/pruebas). Una única llamada al modelo configurado; sin selectores de enrutamiento ni fallback.
-- **Facial** (`FACE_VERIFICATION_PROVIDER`): `local` (Human/TFJS, predeterminado) o `face_service` (servicio FastAPI con InsightFace, véase "Activación de face_service").
-
-## Gestor y requisitos
-
-Use Node.js 24 y pnpm 11.3.0. El gestor está declarado en `package.json`; no use npm ni instale dependencias desde la raíz del repositorio. `pnpm-workspace.yaml` no define un workspace: sólo permite los scripts de instalación necesarios para los binarios locales de Prisma, TensorFlow, bcrypt, esbuild y Tesseract.
+Todos se ejecutan desde `backend/`:
 
 ```bash
 pnpm install
-cp .env.example .env
-pnpm assets:bootstrap
 pnpm prisma:generate
-pnpm prisma:migrate -- --name init
+pnpm prisma migrate deploy
 pnpm start:dev
+pnpm test
+pnpm build
 ```
 
-`DATABASE_URL` debe apuntar a PostgreSQL. Antes de usar datos reales, reemplace todos los valores de ejemplo, especialmente `JWT_SECRET`, `KYC_DOCUMENT_HASH_PEPPER`, las credenciales del proveedor documental y las credenciales de base de datos.
-
-## Variables y Prisma
-
-`.env.example` documenta las variables de puerto, base de datos, JWT, CORS, almacenamiento privado, assets locales, proveedor documental y umbrales KYC. `KYC_DOCUMENT_HASH_PEPPER` es un secreto independiente del JWT. Genere el cliente Prisma antes de compilar o ejecutar la API:
+Para crear una migración después de modificar el schema durante desarrollo:
 
 ```bash
+pnpm prisma migrate dev --name descripcion_del_cambio
 pnpm prisma:generate
-pnpm prisma:migrate -- --name descripcion-del-cambio
 ```
 
-## Proveedor documental configurable, modelos locales y comportamiento fail-closed
+En producción se aplica `prisma migrate deploy`; nunca se debe usar un reset
+destructivo contra la base compartida.
 
-### Evidencia documental por lado
+## Flujo y máquina de estados
 
-El flujo KYC captura la cédula colombiana por ambos lados. Cada evidencia documental se etiqueta con `FRONT`, `BACK` o `COMBINED`:
-
-- `FRONT` y `BACK` son la vía por defecto: se capturan el frente y el reverso de la cédula por separado.
-- `COMBINED` agrupa ambos lados en una única imagen y es excluyente: no puede coexistir con `FRONT` o `BACK`.
-- Se admite como máximo una evidencia por lado; re-subir el mismo lado reemplaza la evidencia previa.
-
-El backend aplica cobertura de fallo cerrado antes de cualquier decisión: si se captura `FRONT` sin `BACK`, si falta un lado, o si una imagen `COMBINED` no contiene ambos lados legibles, el caso termina en `NEEDS_REVIEW`. La comparación facial usa exclusivamente la imagen `FRONT`, o la imagen `COMBINED` confirmada por el proveedor documental configurado con ambos lados presentes; nunca usa `BACK`.
-
-### Extracción documental y activación del proveedor
-
-Gemini es el proveedor documental predeterminado y `.env.example` lo declara explícitamente. Configure `KYC_DOCUMENT_PROVIDER=gemini` y establezca `GEMINI_API_KEY` sólo en `backend/.env` o en el gestor seguro de secretos del entorno. Nunca use variables `EXPO_PUBLIC_*`, no envíe la credencial al frontend y no la registre en logs, base de datos ni respuestas HTTP. `GEMINI_MODEL` permite fijar el modelo, con `gemini-2.5-flash` como valor por defecto.
-
-Para activar Hugging Face después del merge, el operador debe: (1) crear y guardar `HUGGINGFACE_API_TOKEN` exclusivamente en el gestor seguro de secretos del backend o en `backend/.env`; (2) establecer `HUGGINGFACE_DOCUMENT_MODEL` con un modelo y proveedor explícitos, por ejemplo `Qwen/Qwen2.5-VL-72B-Instruct:ovhcloud`; (3) fijar `KYC_DOCUMENT_PROVIDER=huggingface`; (4) opcionalmente ajustar `HUGGINGFACE_DOCUMENT_TIMEOUT_MS` entre 1000 y 120000 milisegundos (30000 por defecto); y (5) reiniciar la API. No use los selectores de enrutamiento `:fastest`, `:cheapest` ni `:preferred`, y no configure un fallback: cada solicitud usa una única llamada al modelo configurado.
-
-Un proveedor documental externo puede recibir únicamente las imágenes JPEG normalizadas de cédula etiquetadas por lado (`FRONT`, `BACK` o `COMBINED`), con un contrato JSON Schema estricto y validación semántica local compartida por los proveedores. La selfie nunca se transmite al proveedor documental. Si la comparación facial es local, la selfie se procesa en Human/TFJS dentro del backend; si se selecciona `face_service`, el backend envía por HTTPS únicamente `FRONT` o `COMBINED` confirmado por el proveedor documental, junto con la selfie, y nunca `BACK`. El backend espera además de los campos extraídos los indicadores `frontPresent` y `backPresent` para confirmar qué lados llegaron legibles. La auditoría persiste únicamente la procedencia mínima del procesamiento documental (proveedor y modelo), nunca credenciales ni el texto OCR o PII crudo de la respuesta del modelo.
-
-Los campos de perfil documentales incluyen el nombre, `documentNumber` (presentado como `NUIP / ID`), fechas, sexo, estatura, tipo de sangre y lugar de nacimiento. Las propiedades opcionales se conservan como `null` cuando son ilegibles o inválidas y nunca se exigen para aprobar un resultado. `documentNationality` es un dato derivado y no OCR: sólo vale `COLOMBIAN` cuando el tipo confirmado es exactamente `COLOMBIAN_CEDULA`; no se solicita al modelo, no se persiste y no participa en aprobar o rechazar KYC. La clasificación de imágenes tampoco demuestra autenticidad ni constituye una comprobación antifraude.
-
-Antes de iniciar la captura, la app solicita consentimiento explícito visible para `remote-verification-v2` cuando el proveedor documental o el servicio facial es externo. Informa que las imágenes documentales `FRONT`, `BACK` o `COMBINED` pueden enviarse al proveedor documental externo y que `FRONT` o `COMBINED`, junto con la selfie, pueden enviarse por HTTPS al servicio facial remoto, que no hay prueba de vida y que la persona puede cancelar. `POST /kyc/start` exige esa versión exacta y conserva sólo la versión y la hora generada por el servidor. Documento, selfie y validación vuelven a comprobar el consentimiento; no se almacena su texto ni PII adicional.
-
-`KYC_DOCUMENT_PROVIDER=local` mantiene Tesseract como modo explícito para desarrollo y pruebas; no es un fallback automático si falla un proveedor externo. `pnpm assets:bootstrap` descarga el OCR en español y copia los modelos locales de detección y comparación facial. Genera `assets/manifest.json`; el backend valida sus checksums.
-
-Cuando `FACE_VERIFICATION_PROVIDER` no está configurado como `face_service`, la detección, embeddings y comparación facial corren en proceso con Human/TFJS. Con `face_service`, la comparación se delega al servicio remoto descrito abajo. En ambos modos no son liveness, detección anti-spoofing ni una aprobación biométrica certificada. La ausencia, modificación o error de un asset, una respuesta inválida o cualquier fallo del proveedor termina el trabajo KYC como `PROCESSING_FAILED`; no existe aprobación local automática.
-
-### Activación de face_service (comparación facial delegada)
-
-Por defecto la comparación facial es local con Human/TFJS. Para delegarla al servicio `backend/face-service` (FastAPI con InsightFace, público en Render y autenticado exclusivamente entre servidores), el operador debe:
-
-1. Levantar el servicio siguiendo `backend/face-service/README.md` (por ejemplo, en el entorno del servicio: `uvicorn app.main:app --host 127.0.0.1 --port 8000`).
-2. Configurar en `backend/.env` (valores por defecto en `.env.example`, validados por `AppConfigService`):
-   - `FACE_VERIFICATION_PROVIDER=face_service` (dominio: `local` o `face_service`).
-   - `FACE_SERVICE_URL` (URL HTTPS del servicio remoto en producción).
-   - `FACE_SERVICE_TIMEOUT_MS` (por defecto `30000`).
-   - `FACE_API_KEY` (obligatoria y compartida con el face-service; nunca `EXPO_PUBLIC_*`).
-3. Reiniciar la API.
-
-Semántica: el backend envía al face-service únicamente la imagen `FRONT` (o la `COMBINED` confirmada por el proveedor documental con ambos lados) junto con la selfie; nunca `BACK`, y añade `X-API-Key` en cada petición. El contrato remoto exige calidad `HIGH` y acción `OK`, y valida la similaridad coseno finita en `[-1, 1]`, su distancia derivada `1 - similarity` en `[0, 2]`, y la coherencia entre `match`, `action` y `KYC_FACE_MIN_SIMILARITY` (por defecto `0.72`). Ante timeout, error de red, respuesta inválida, falta de autenticación o calidad insuficiente, el flujo falla cerrado (`NEEDS_REVIEW` o `PROCESSING_FAILED`) y nunca aprueba por degradación.
-
-`KYC_LOCAL_FACE_MAX_DISTANCE` y `KYC_LOCAL_FACE_MIN_CONFIDENCE` son límites exclusivos del proveedor local Human/TFJS: el primero escala la distancia euclidiana normalizada y el segundo filtra la confianza del detector de selfie. No se envían al face-service ni se aplican a su similaridad coseno. El campo remoto `confidence` (`high`/`low`) es una etiqueta informativa derivada de la similaridad del servicio y no es la confianza del detector local; por eso una respuesta remota válida puede contener `confidence: "low"`.
-
-Cuando el endpoint de calidad devuelve una captura `LOW`, el worker conserva un código de revisión allowlisted que identifica lado y razón canónica, por ejemplo `FACE_CAPTURE_QUALITY_DOCUMENT_BLURRY` o `FACE_CAPTURE_QUALITY_SELFIE_NO_FACE`. Nunca incorpora la razón textual sin validar ni contenido de la imagen en logs o respuestas.
-
-## Documentación de la API (OpenAPI y Scalar)
-
-El backend documenta su API con OpenAPI mediante `@nestjs/swagger`. Una vez iniciado, el esquema JSON está disponible en `/api-json` y la referencia interactiva de Scalar en `/docs` (además de Swagger UI en `/api`). Los controladores de Auth, Users y KYC incluyen etiquetas, descripción y códigos de respuesta. Levante la API y abra `/docs` para explorar y probar los endpoints.
-
-## Capa de seguridad HTTP
-
-El backend aplica tres controles defensivos sin cambiar la lógica de dominio:
-
-### Helmet (cabeceras HTTP seguras)
-
-Se aplica `helmet` globalmente en `src/main.ts` con una CSP controlada. La API devuelve JSON, no HTML, de modo que la CSP sólo afecta a la documentación autoservida: permite `self` más el host `https://cdn.jsdelivr.net` (que Scalar usa para su renderer) y estilos `unsafe-inline` exclusivos para las UIs de documentación. Swagger UI sirve sus assets desde el mismo origen. Los clientes móviles nativos no interpretan CSP, por lo que el tráfico JSON no se ve afectado por esta directiva.
-
-### Rate limiting (`@nestjs/throttler`)
-
-Un throttler global divide el tráfico en tres límites independientes, cada uno configurable por variable de entorno con valores por defecto sensatos:
-
-| Límite | Rutas | Por defecto | Variables |
-|---|---|---|---|
-| `default` | REST general (perfil de usuario) | 100 peticiones / 60 s | `RATE_LIMIT_DEFAULT_LIMIT`, `RATE_LIMIT_DEFAULT_TTL_MS` |
-| `auth` | `POST /auth/register` y `/login` | 10 peticiones / 60 s, bloqueo 300 s | `RATE_LIMIT_AUTH_LIMIT`, `RATE_LIMIT_AUTH_TTL_MS`, `RATE_LIMIT_AUTH_BLOCK_MS` |
-| `kyc` | subidas de documento y selfie | 30 peticiones / 60 s, bloqueo 120 s | `RATE_LIMIT_KYC_LIMIT`, `RATE_LIMIT_KYC_TTL_MS`, `RATE_LIMIT_KYC_BLOCK_MS` |
-
-- El límite estricto de `auth` frena fuerza bruta y abuso sobre los endpoints públicos.
-- El límite moderado de `kyc` evita subidas repetidas sin romper flujos legítimos. El rastreo es por IP (método práctico: los guards globales corren antes que el guard JWT, por lo que todavía no hay usuario autenticado al limitar).
-- La documentación (`/docs`, `/api`, `/api-json`) no se limita. Los guiones `skipIf` garantizan que cada petición se cuente una sola vez contra el límite que le corresponde.
-- Al superar un límite se responde `429 Too Many Requests` con la cabecera `Retry-After` y las cabeceras estándar `X-RateLimit-Limit` / `X-RateLimit-Remaining` / `X-RateLimit-Reset`.
-- `RATE_LIMIT_ENABLED=false` desactiva todo el throttling (útil en desarrollo).
-
-Para ajustar los límites, edite las variables de `backend/.env` (copie las nuevas líneas de `.env.example`) y reinicie la API.
-
-#### Cómo probar el 429
-
-Con la API levantada, supere el límite del endpoint de login. Por ejemplo, con límite por defecto de 10 peticiones/60 s, dispare más intentos en una ventana corta:
-
-```bash
-for i in $(seq 1 12); do
-  curl -s -o /dev/null -w "%{http_code}\n" \
-    -X POST http://localhost:3000/auth/login \
-    -H "Content-Type: application/json" \
-    -d '{"email":"a@example.com","password":"x"}'
-done
+```text
+CREATED
+  → DOCUMENT_UPLOADED
+  → SELFIE_UPLOADED
+  → VALIDATING
+  → APPROVED | REJECTED | NEEDS_REVIEW | PROCESSING_FAILED
 ```
 
-Las primeras peticiones devuelven estados normales (`200`/`401`) y las siguientes `429` con la cabecera `Retry-After`. La documentación y las rutas generales no deberían devolver `429` durante esta prueba. Puede reducir temporalmente `RATE_LIMIT_AUTH_LIMIT` a un valor bajo para observar el efecto más rápido.
+El worker procesa una verificación mediante un job idempotente. Antes de
+procesar verifica que la verificación siga en `VALIDATING`, que existan las
+imágenes y que exista el consentimiento requerido para procesamiento externo.
 
-### Logging y filtro de errores central
+Una transición terminal conserva el estado, el motivo y las métricas que sí se
+pudieron obtener. Un fallo nunca se transforma en aprobación por degradación.
 
-- **HTTP logger**: se registran método, ruta, código de estado, duración, IP y (cuando existe) el id de usuario. Nunca se registran cuerpos de petición (contraseñas, tokens), contenido multipart ni cuerpos de respuesta (resultados KYC/PII). Los assets estáticos de la documentación se omiten para mantener los logs centrados en tráfico de aplicación.
-- **Filtro de excepciones**: normaliza los errores a `{ statusCode, message, path, timestamp }`. No expone stack traces ni detalles internos en producción; los errores desconocidos devuelven `500 Internal server error` genérico. No filtra PII.
+### Secuencia de procesamiento
 
-Los errores de dominio KYC no cambiaron y el pipeline mantiene su comportamiento de fallo cerrado. La autenticación sigue siendo per-controlador (`JwtAuthGuard` en Users y KYC; los endpoints de Auth permanecen públicos), sin aplicar un guard JWT global para no alterar el comportamiento existente.
+```mermaid
+sequenceDiagram
+    participant U as Usuario
+    participant A as API NestJS
+    participant W as Worker KYC
+    participant B as B2 privado
+    participant O as OpenCode Go
+    participant R as Railway InsightFace
+    participant D as PostgreSQL
 
-## Infraestructura
-
-Los archivos de infraestructura están en `infra/`. Cuando se solicite ejecutar Docker, hágalo desde esa carpeta para que el contexto de construcción sea `backend/` y Compose tome `backend/.env`:
-
-```bash
-cd infra
-cp ../.env.example ../.env
-docker compose --env-file ../.env up --build
+    U->>A: Sube FRONT, BACK y SELFIE
+    A->>B: Guarda objetos privados
+    A->>D: Guarda metadatos
+    U->>A: Solicita verificación
+    A->>W: Encola job
+    W->>B: Lee FRONT y SELFIE
+    W->>O: Extrae y clasifica documentos
+    W->>O: Compara FRONT y SELFIE
+    W->>R: Solicita calidad y comparación biométrica
+    W->>W: Calcula promedio
+    W->>D: Persiste resultado y resumen
+    A-->>U: Estado, porcentajes e historial
 ```
 
-`backend/.dockerignore` permanece en la raíz del contexto de construcción (`backend/`), que es donde Docker lo evalúa. Excluye dependencias, secretos, datos privados y artefactos generados del contexto sin ocultarlos de Git.
+## API principal
 
-## Verificación y límites del MVP
+Las rutas concretas se encuentran en `src/kyc/kyc.controller.ts`. El contrato
+principal es:
+
+| Ruta | Propósito |
+| --- | --- |
+| `POST /kyc/document` | Subir o reemplazar evidencia documental etiquetada |
+| `POST /kyc/selfie` | Subir o reemplazar una selfie individual, para compatibilidad |
+| `POST /kyc/selfie/candidates` | Subir entre dos y tres selfies candidatas |
+| `POST /kyc/verify` | Encolar la verificación |
+| `GET /kyc/current` | Obtener la verificación activa del usuario |
+| `GET /kyc/history` | Obtener verificaciones finalizadas, paginadas |
+| `GET /kyc/history/:verificationId` | Obtener el detalle de una verificación propia |
+| `GET /kyc/media/:mediaId` | Descargar una imagen mediante autorización |
+| `GET /health` | Health check del proceso |
+
+Las rutas autenticadas aplican autorización por usuario. El historial no permite
+consultar verificaciones de otra cuenta y aplica la retención configurada.
+
+## Proveedores documentales
+
+### OpenCode Go
+
+Con `KYC_DOCUMENT_PROVIDER=opencode-go`, el provider envía imágenes
+documentales etiquetadas y exige una respuesta estructurada. El backend valida:
+
+- El tipo `COLOMBIAN_CEDULA`.
+- La presencia y forma de los campos mínimos.
+- La cobertura `FRONT`/`BACK`.
+- El código de razón canónico.
+- La ausencia de respuesta cruda no estructurada.
+
+El prompt de extracción indica que sólo se debe identificar y extraer el mínimo
+necesario. No se guarda la respuesta OCR cruda. La selfie no se envía en esta
+etapa.
+
+### Proveedor local de desarrollo
+
+El provider local/Tesseract existe para desarrollo y pruebas explícitas. No es
+un fallback automático de OpenCode Go. Si el proveedor configurado falla, el
+worker termina en el estado de fallo o revisión correspondiente.
+
+## Comparación facial
+
+Hay dos providers con responsabilidades distintas.
+
+### `FaceVerificationProvider`: biometría Python
+
+`FaceServiceVerificationProvider` llama al servicio FastAPI de Railway:
+
+1. `POST /face/quality` recibe el frente y la selfie y verifica que ambos
+   contengan un rostro usable.
+2. `POST /face/compare` genera la comparación sólo si la calidad fue suficiente.
+3. El resultado técnico se valida, se normaliza y se guarda en
+   `faceSimilarity`/`faceDistance`.
+
+Un rostro ausente, pequeño, borroso o una respuesta inválida no se convierte en
+un match. Los retries se limitan a fallos transitorios de red/servidor; no se
+reintenta indefinidamente un resultado determinista de baja calidad.
+
+### `FaceAiVerificationProvider`: OpenCode Go complementario
+
+`OpenCodeGoFaceAiVerificationProvider` reutiliza las credenciales y el modelo
+OpenCode Go existentes, pero usa una solicitud diferente. Envía el frente
+documental y exactamente la selfie candidata que obtuvo la mayor similitud
+biométrica:
+
+```text
+document_front + selected_selfie
+```
+
+El provider exige:
+
+```text
+verdict: same_person | different_person | needs_review
+similarity_percent: 0..100 o null
+summary: texto corto en español
+```
+
+El resumen no debe incluir nombres, números ni OCR. Un resultado malformado,
+fuera de rango o ausente queda sin persistir como señal válida.
+
+### Regla combinada
+
+Cuando existen los dos números:
+
+```text
+biometric_percent = faceSimilarity * 100
+combined_percent = (biometric_percent + faceAiSimilarityPercent) / 2
+```
+
+La condición final es estricta:
+
+```text
+biometric_percent >= KYC_FACE_MIN_BIOMETRIC_PERCENT
+combined_percent > 50  → APPROVED / same_person
+combined_percent <= 50 → REJECTED / different_person
+
+El piso biométrico es una condición necesaria adicional. Si no se alcanza, el
+worker devuelve `NEEDS_REVIEW` aunque el promedio aritmético supere 50.
+```
+
+### Relación entre los valores
+
+```mermaid
+flowchart TD
+    A[faceSimilarity: 0..1] --> B[Multiplicar por 100]
+    B --> C[Porcentaje biométrico]
+    D[faceAiSimilarityPercent: 0..100] --> E[Porcentaje de IA]
+    C --> F[(Biométrica + IA) / 2]
+    E --> F
+    F --> G[faceCombinedSimilarityPercent]
+    G --> H{Mayor que 50}
+    H -->|Sí| I[APPROVED]
+    H -->|No| J[REJECTED]
+```
+
+Si la IA está configurada pero no entrega un porcentaje válido, la salida es
+`NEEDS_REVIEW`. Así se evita aprobar usando una sola señal cuando el requisito
+de negocio exige el promedio de ambas.
+
+## Worker y persistencia
+
+El worker ejecuta, en orden:
+
+1. Leer metadatos de la verificación.
+2. Leer documentos y todas las selfies candidatas desde el storage port.
+3. Ejecutar extracción documental.
+4. Validar tipo, perfil y cobertura.
+5. Seleccionar el frente que se usará para rostro.
+6. Ejecutar calidad y comparación Python para cada selfie candidata.
+7. Seleccionar la mayor similitud y persistir esa candidata.
+8. Ejecutar el análisis visual OpenCode con frente + la selfie seleccionada.
+9. Calcular promedio y veredicto combinado.
+10. Persistir el resultado terminal.
+
+Python decide cuál candidata es la mejor señal biométrica. El mismo buffer de
+esa candidata se reutiliza en OpenCode, de modo que ambas señales evalúan la
+misma imagen. Si ninguna candidata puede compararse, el worker falla de forma
+cerrada; OpenCode no sustituye un score biométrico faltante.
+
+## Campos de base de datos
+
+`KycVerification` conserva campos documentales mínimos y estas métricas:
+
+| Campo | Unidad | Significado |
+| --- | --- | --- |
+| `faceSimilarity` | `0..1` | Similitud técnica Python |
+| `faceDistance` | distancia | Distancia derivada del provider facial |
+| `faceAiVerdict` | enum textual | Veredicto visual de OpenCode |
+| `faceAiSimilarityPercent` | `0..100` | Estimación visual de OpenCode |
+| `faceAiSummary` | texto acotado | Explicación en español |
+| `faceAiProvider` | texto | Auditoría del provider |
+| `faceAiProviderModel` | texto | Auditoría del modelo |
+| `faceCombinedSimilarityPercent` | `0..100` | Promedio final |
+| `faceCombinedVerdict` | enum textual | Resultado del promedio |
+
+Las migraciones actuales relevantes son:
+
+- `20260906210000_add_ai_face_verification`
+- `20260906213000_add_combined_face_score`
+
+El backend devuelve estos campos en `current`, `history` y `history/:id` para
+que perfil e historial representen el mismo resultado persistido.
+
+El umbral técnico de Python (`KYC_FACE_MIN_SIMILARITY`) y el piso independiente
+de seguridad (`KYC_FACE_MIN_BIOMETRIC_PERCENT`) son controles diferentes. El
+segundo evita que un porcentaje alto de OpenCode compense una señal biométrica
+demasiado baja. Su valor inicial es `30`; debe recalibrarse con un conjunto de
+casos etiquetados antes de cambiarlo en producción.
+
+## Almacenamiento B2
+
+El puerto de archivos permite cambiar de provider sin modificar el worker.
+`FILE_STORAGE_PROVIDER=b2` selecciona el adapter B2.
+
+Variables necesarias:
+
+```text
+B2_BUCKET_NAME
+B2_KEY_ID
+B2_APPLICATION_KEY
+```
+
+El bucket es privado. El backend autoriza, sube, descarga y elimina objetos; el
+cliente sólo consume una ruta autenticada. Las claves de objetos se validan
+antes de leer y las imágenes nunca se escriben en logs.
+
+## Seguridad y privacidad
+
+- `DATABASE_URL`, B2, OpenCode Go, Hugging Face, JWT y hash pepper son secretos
+  backend-only.
+- Los documentos y selfies son PII confidencial.
+- La respuesta OCR cruda nunca se guarda.
+- Los logs HTTP registran método, ruta, estado, duración e IP, no cuerpos.
+- No hay fallback automático que apruebe por error.
+- La biometría facial no se presenta como prueba de vida.
+- Si una clave se expone, se revoca y rota; no se reutiliza.
+
+## Validación
 
 ```bash
 pnpm test
 pnpm build
-pnpm prisma:generate
-pnpm audit
 ```
 
-El MVP conserva imágenes fuera de exposición pública. No sustituye revisión regulatoria, pruebas de vida certificadas ni un proveedor de identidad de producción.
-
-## Auditoría de dependencias
-
-Se resolvieron las 14 vulnerabilidades transitivas que afectaban al MVP mediante un bloque `overrides` declarado en `pnpm-workspace.yaml` (no en `package.json`: pnpm 11 dejó de leer configuraciones del campo `pnpm` y los overrides deben declararse en el archivo de workspace). Las versiones efectivas pasaron de `tar@6.2.1` a `tar@7.5.22`, de `adm-zip@0.5.18` a `adm-zip@0.6.0` y de `deepmerge-ts@7.1.5` a `deepmerge-ts@8.0.2`. Se verificó el estado final con `pnpm prisma:generate`, `pnpm build` y `pnpm test` (24 pruebas en 5 suites, todas en verde) y `pnpm audit` reporta cero hallazgos en todas las severidades.
-
-Las rutas afectadas quedaron: `tar` proviene de `@tensorflow/tfjs-node` (directa y vía `@mapbox/node-pre-gyp`) y de `bcrypt` vía `@mapbox/node-pre-gyp`; `adm-zip` de `@tensorflow/tfjs-node`; y `deepmerge-ts` de Prisma (`@prisma/client` y `prisma`). Los saltos mayores de `tar` y `adm-zip` conservan la extracción nativa: los binarios de `bcrypt` y `tfjs-node` se reconstruyeron y cargan correctamente con la nueva versión de `tar`.
-
-Nota: en este entorno (Node v24) `tfjs-node@4.22.0` presenta una incompatibilidad preexistente en su capa JS con la API `util.isNullOrUndefined` (eliminada de Node 24), observable al ejecutar tensores con `dataSync()`. Es un problema de versión del runtime de Node, independiente del override de `tar`, y no se aborda en esta tarea de seguridad. Se recomienda fijar la versión de Node o actualizar TensorFlow como trabajo separado antes del despliegue.
+Los tests cubren estados, cobertura documental, providers, storage, historial,
+autorización y respuestas inválidas. Para el servicio Python, consultar
+[`backend/face-service/README.md`](face-service/README.md).

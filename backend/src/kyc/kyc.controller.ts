@@ -11,10 +11,11 @@ import {
   Query,
   StreamableFile,
   UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from "@nestjs/common";
-import { FileInterceptor } from "@nestjs/platform-express";
+import { FileInterceptor, FilesInterceptor } from "@nestjs/platform-express";
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from "@nestjs/swagger";
 import type { Express } from "express";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
@@ -92,6 +93,22 @@ export class KycController {
     @UploadedFile() file?: Express.Multer.File,
   ): Promise<KycPublicVerification> {
     return this.kycService.uploadSelfie(user, this.requireFile(file));
+  }
+
+  @Post("selfie/candidates")
+  @UseInterceptors(FilesInterceptor("images", 3, { limits: { ...MULTIPART_LIMITS, files: 3 } }))
+  @ApiOperation({ summary: "Upload multiple selfie candidates for automatic selection" })
+  @ApiConsumes("multipart/form-data")
+  @ApiResponse({ status: 200, description: "Selfie candidates accepted" })
+  @ApiResponse({ status: 400, description: "Between two and three selfie candidates are required" })
+  async uploadSelfieCandidates(
+    @CurrentUser() user: AuthenticatedUser,
+    @UploadedFiles() files: Express.Multer.File[] | undefined,
+  ): Promise<KycPublicVerification> {
+    if (!files || files.length < 2 || files.length > 3) {
+      throw new BadRequestException("Between two and three selfie candidates are required");
+    }
+    return this.kycService.uploadSelfieCandidates(user, files.map((file) => file.buffer));
   }
 
   @Post("verify")

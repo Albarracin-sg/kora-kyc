@@ -1,237 +1,293 @@
-# Koa Face Service
+# Servicio facial Python de Kora
 
-Servicio público de comparación facial para KYC, llamado sólo por el backend NestJS.
+Servicio FastAPI aislado que ejecuta InsightFace para evaluar la calidad de las
+imágenes y calcular similitud biométrica entre el frente de la cédula y la
+selfie. El backend NestJS lo usa únicamente cuando
+`FACE_VERIFICATION_PROVIDER=face_service`.
 
-**Scope (closed by decision):** FastAPI + InsightFace/ArcFace (SCRFD
-detector + ArcFace embeddings), cosine-similarity comparison, and a
-pre-comparison **quality gate** that flags small or blurry faces as `LOW` /
-`NEEDS_REVIEW`. Nothing else.
+## Por qué existe como servicio separado
 
-- The document OCR pipeline is untouched (it stays in the NestJS backend).
-- The NestJS backend can select this service explicitly (see
-  [Integración NestJS](#integración-nestjs)); use HTTPS in production and HTTP
-  only for local development - always an opt-in, never a fallback.
-- Fail-closed: a degraded input can never approve a match.
-- PII-safe: images travel as **base64 payloads, never URLs**, and no
-  image, embedding or base64 content is ever logged or persisted.
+InsightFace, ONNX Runtime y sus modelos son dependencias pesadas y específicas
+de Python. Separarlas del proceso NestJS permite:
 
-## Layout
+- Construir una imagen de runtime independiente.
+- Precargar el modelo una sola vez al iniciar el contenedor.
+- Exponer readiness real (`/ready`).
+- Escalar o reiniciar el proceso facial sin mezclarlo con la API.
+- Mantener las imágenes en memoria y fuera de logs.
 
-```
-backend/face-service/
-├── pyproject.toml        # pytest configuration only
-├── requirements.txt      # runtime dependencies
-├── requirements-dev.txt  # test dependencies (pytest)
-├── README.md
-├── app/
-│   ├── __init__.py
-│   ├── config.py         # env-based settings (documented defaults)
-│   ├── schemas.py        # pydantic request/response models
-│   ├── quality.py        # quality gate: rules + blur metric + base64 decode
-│   ├── face_service.py   # cosine similarity, best-face selection, compare flow
-│   └── main.py           # FastAPI app (thin HTTP layer)
-├── conftest.py           # pytest bootstrap
-└── tests/
-    ├── test_quality.py
-    ├── test_face.py
-    └── test_smoke_optional.py
-```
-
-## Install
-
-Python 3.12.8 en Render; para desarrollo use una versión compatible.
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt      # runtime stack
-pip install -r requirements-dev.txt  # pytest
-```
-
-The unit tests are dependency-light by design (mocked model, no weights):
-installing only `pytest` is enough to run them, even on a machine where
-`insightface`/`onnxruntime` cannot be installed.
-
-> El build de Render descarga `buffalo_sc` en `INSIGHTFACE_ROOT`; el disco
-> local es efímero y el modelo se vuelve a descargar después de un redeploy.
-
-# Run
-
-```bash
-cd backend/face-service
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-## Integration with the NestJS backend
-
-The backend selects the face verification provider explicitly through
-environment configuration. Selecting `face_service` routes the facial
-verification of every KYC job to this service over HTTPS in production or HTTP
-only for local development; the default remains `local` (Human/TFJS,
-in-process). These are explicit selections only - there is no automatic
-routing and no fallback.
-
-| Backend variable             | Default                | Meaning                                                        |
-| ---------------------------- | ---------------------- | -------------------------------------------------------------- |
-| `FACE_VERIFICATION_PROVIDER` | `local`                | `local` or `face_service` (this service)                       |
-| `FACE_SERVICE_URL`           | `http://localhost:8000` | Base URL; HTTPS in production, HTTP only for local development |
-| `FACE_SERVICE_TIMEOUT_MS`    | `30000`                | Per-request timeout, bounded to 1000-120000 ms                 |
-| `FACE_API_KEY`                | none                    | Obligatoria para ambos servicios; se transmite sólo como `X-API-Key` |
-
-Run both without Docker:
-
-The HTTP commands below are for local development only. Production
-deployments must configure an HTTPS `FACE_SERVICE_URL`.
-
-```bash
-# terminal 1 - face service
-cd backend/face-service
-source .venv/bin/activate
-uvicorn app.main:app --host 127.0.0.1 --port 8000
-
-# terminal 2 - backend
-cd backend
-FACE_VERIFICATION_PROVIDER=face_service pnpm start:dev
-```
-
-The backend calls `POST /face/quality` first and, only when both verdicts
-are `HIGH`, `POST /face/compare` with the same base64 JSON payload. It maps
-`match`/`similarity` straight into the facial result (`distance = 1 -
-similarity`, matching the cosine semantics of this service) and fails
-closed on every degraded path: `LOW` quality, `NEEDS_REVIEW` verdicts,
-HTTP errors, timeouts, and malformed or out-of-schema payloads are
-surfaced as face capture failures - a verification is never approved by
-degradation.
-
-## Configuration (environment variables)
-
-| Variable                         | Default    | Meaning                                                              |
-| -------------------------------- | ---------- | -------------------------------------------------------------------- |
-| `FACE_MATCH_THRESHOLD`           | `0.72`     | Cosine similarity at or above which faces match                         |
-| `FACE_HIGH_CONFIDENCE_THRESHOLD` | `0.60`     | Similarity at or above which `confidence` is `high`                  |
-| `FACE_BLUR_THRESHOLD`            | `25.0`     | Laplacian-variance floor; below it the image is `blurry`             |
-| `FACE_DOCUMENT_MIN_WIDTH_PX`     | `90`       | Document-only minimum face width; strictly below is `face_resolution_too_small` |
-| `FACE_SELFIE_MIN_WIDTH_PX`       | `100`      | Selfie minimum face width; unchanged and strictly below is `face_resolution_too_small` |
-| `FACE_DET_SIZE`                  | `640,640`  | SCRFD detection resolution (`W,H`)                                   |
-| `INSIGHTFACE_MODEL`              | `buffalo_l`| InsightFace model zoo name                                           |
-| `INSIGHTFACE_ROOT`               | `~/.insightface` | Directorio de modelos; en Render use el workspace efímero del servicio |
-
-## API
-
-Transport is JSON; images are **base64 strings** (never URLs, for PII
-privacy). Each encoded image field is bounded before decoding, and the
-decoded payload is capped at 15 MB.
+## Endpoints
 
 ### `GET /health`
 
-```json
-{ "status": "ok" }
-```
+Health check de proceso. Devuelve `200` si la aplicación está viva; no garantiza
+que el modelo facial esté listo.
+
+### `GET /ready`
+
+Readiness del modelo. Devuelve `200` después de precargar InsightFace y `503`
+si el analizador todavía no está disponible.
 
 ### `POST /face/quality`
 
-Request:
+Recibe una estructura con dos imágenes base64:
 
 ```json
 {
-  "document_face": "<base64 of the ID portrait>",
-  "selfie": "<base64 of the selfie>"
+  "document_face": "<base64>",
+  "selfie": "<base64>"
 }
 ```
 
-Response - one verdict per image, keyed by field name:
+Devuelve calidad separada para documento y selfie:
 
 ```json
 {
-  "document": { "quality": "LOW", "reason": "face_resolution_too_small",
-                "face_width_px": 89, "laplacian_variance": 188.4,
-                "action": "NEEDS_REVIEW" },
-  "selfie":   { "quality": "HIGH", "reason": "ok",
-                "face_width_px": 240, "laplacian_variance": 92.1,
-                "action": "OK" }
+  "document": {
+    "quality": "HIGH",
+    "reason": "ok",
+    "face_width_px": 184,
+    "laplacian_variance": 342.1,
+    "action": "OK"
+  },
+  "selfie": {
+    "quality": "HIGH",
+    "reason": "ok",
+    "face_width_px": 512,
+    "laplacian_variance": 890.3,
+    "action": "OK"
+  }
 }
 ```
 
-Reasons: `ok` | `face_resolution_too_small` | `blurry` | `no_face` | `error`.
-
-Rules, checked in order:
-
-1. No detectable face -> `no_face` / `LOW`.
-2. Face width strictly below the image-specific minimum -> `face_resolution_too_small`.
-3. Laplacian variance below `FACE_BLUR_THRESHOLD` (or not computable) -> `blurry` (fail-closed).
-4. Otherwise -> `HIGH` / `OK`.
-
-Document orientation is normalized conservatively by testing `0`, `90`, `180`
-and `270` degrees clockwise. The selected candidate is deterministic: a
-`HIGH`/`OK` candidate wins first, followed by detected-face confidence and
-geometry, with the original `0` degree orientation as the final tie-breaker.
-The selfie is evaluated only at `0` degrees. The same selector is used by
-both `/face/quality` and `/face/compare`; the face retained by compare comes
-from that selected document orientation, never from the unnormalized image.
-The document floor is `90px`; the example uses `89px` to show the strictly
-below-floor outcome. The selfie floor stays at `100px`, and neither the blur
-nor no-face gate is bypassed.
+Los valores numéricos son métricas técnicas, no porcentajes de identidad.
 
 ### `POST /face/compare`
 
-Request: same shape as `/face/quality`.
+Usa la misma forma de request. Primero vuelve a evaluar la calidad y luego,
+si ambas imágenes son utilizables, obtiene embeddings y calcula la similitud.
+La respuesta contiene el match, similitud, confianza informativa, calidades,
+acción y razones por lado. Una respuesta HTTP `200` sólo significa que el
+servicio respondió correctamente; no significa que la identidad fue aprobada.
 
-Response:
+### Secuencia de las rutas
 
-```json
-{
-  "match": false,
-  "similarity": null,
-  "confidence": null,
-  "quality_document": "LOW",
-  "quality_selfie": "HIGH",
-  "action": "NEEDS_REVIEW",
-  "reasons": { "document": "face_resolution_too_small", "selfie": "ok" }
-}
+```mermaid
+sequenceDiagram
+    participant W as Worker NestJS
+    participant Q as /face/quality
+    participant C as /face/compare
+    participant I as InsightFace
+
+    W->>Q: FRONT de cédula y selfie
+    Q->>I: Detectar rostros y medir calidad
+    I-->>Q: Calidad por imagen
+    Q-->>W: HIGH o LOW
+    alt Ambas imágenes tienen calidad HIGH
+        W->>C: FRONT de cédula y selfie
+        C->>I: Obtener embeddings
+        I-->>C: Similitud coseno
+        C-->>W: Similaridad biométrica
+    else Alguna imagen no es utilizable
+        W-->>W: NEEDS_REVIEW sin similitud
+    end
 ```
 
-Flow: the quality gate runs **first**. If either image is `LOW`, the
-embeddings are never computed or compared and the result is
-`NEEDS_REVIEW` (fail-closed). Only when both are `HIGH`:
+## Autenticación
 
-- Best face per image (highest detection score) -> ArcFace embedding.
-- `similarity` = cosine similarity; `match` = `similarity >= FACE_MATCH_THRESHOLD`.
-- `confidence` = `high` if `similarity >= FACE_HIGH_CONFIDENCE_THRESHOLD`, else `low`.
-- `confidence` is an informational similarity label, not a Human/TFJS detector
-  confidence threshold. The NestJS remote contract does not apply its
-  local-only confidence or euclidean-distance settings to this field.
-- `action` = `MATCHED` | `NO_MATCH`.
+`/face/quality` y `/face/compare` requieren:
 
-Example:
+```text
+X-API-Key: <FACE_API_KEY>
+```
+
+El servicio lee la variable `FACE_API_KEY`. El backend NestJS debe usar el mismo
+secreto, pero ningún valor debe estar en el repositorio, logs o documentación.
+Si la clave falta o no coincide, la ruta devuelve un error de autenticación y
+el backend no debe aprobar.
+
+## Detección y normalización
+
+### Orientaciones documentales
+
+Las imágenes documentales se evalúan en las orientaciones:
+
+```text
+0°, 90°, 180°, 270°
+```
+
+Esto permite tolerar una captura rotada sin alterar el archivo persistido.
+La selfie se evalúa en su orientación normal.
+
+### Detección de rostros pequeños
+
+El retrato de una cédula suele ocupar una parte pequeña de la imagen. Para
+reducir falsos `no_face`, el servicio intenta para documentos:
+
+```text
+1.0x
+1.5x
+2.0x
+```
+
+El escalado usa interpolación cúbica y se limita a una dimensión máxima de
+4096 píxeles para controlar memoria y latencia. Las selfies no se escalan
+automáticamente.
+
+### Calidad
+
+La calidad considera, entre otros datos:
+
+- Existencia de un rostro detectable.
+- Anchura del rostro en píxeles.
+- Nitidez mediante varianza Laplaciana.
+- Selección de la mejor detección disponible.
+
+Si falta un rostro, el rostro es demasiado pequeño o la imagen está borrosa,
+la respuesta es `LOW`/`NEEDS_REVIEW`. No se genera una similitud ficticia.
+
+## Modelo actual
+
+Railway utiliza:
+
+```text
+INSIGHTFACE_MODEL=buffalo_l
+```
+
+El modelo se precarga durante el startup. Los logs esperados son:
+
+```text
+Applied providers: ['CPUExecutionProvider']
+Application startup complete.
+GET /ready 200 OK
+```
+
+Si aparece un warning indicando que `CUDAExecutionProvider` no está disponible,
+el servicio continúa usando CPU. No es un error cuando la instancia no tiene
+GPU.
+
+## Comparación biométrica
+
+Cuando los dos rostros pasan calidad:
+
+1. InsightFace obtiene la representación facial de cada imagen.
+2. Se calcula similitud coseno.
+3. El resultado se valida contra el contrato `-1..1`.
+4. NestJS guarda el valor normalizado en `faceSimilarity`.
+5. NestJS lo convierte a porcentaje para calcular el promedio con OpenCode.
+
+El umbral técnico configurado por el servicio no debe confundirse con la regla
+final de negocio. La decisión final del MVP se calcula en NestJS mediante:
+
+```text
+promedio = (porcentaje Python + porcentaje OpenCode) / 2
+promedio > 50 → APPROVED
+promedio <= 50 → REJECTED
+```
+
+Si Python no entrega una similitud o OpenCode no entrega un porcentaje válido,
+el promedio no existe y la verificación queda en `NEEDS_REVIEW`.
+
+## Fallos y comportamiento seguro
+
+El servicio falla cerrado:
+
+- Payload inválido: `422` genérico, sin repetir el contenido.
+- Clave ausente o incorrecta: `401`/`503`.
+- Modelo no preparado: readiness `503`.
+- Error al decodificar o analizar imagen: razón `error` y acción de revisión.
+- Rostro no detectable: razón `no_face` y acción de revisión.
+- Calidad baja: no se continúa a una aprobación.
+
+No hay liveness detection ni anti-spoofing. Una fotografía de buena calidad
+puede producir una similitud alta sin demostrar presencia física.
+
+## Despliegue en Railway
+
+El servicio se despliega desde `backend/face-service` con `build.sh`. El build
+instala las dependencias, prepara el modelo y arranca Uvicorn en el puerto
+asignado por Railway.
+
+Configuración operacional:
+
+```text
+INSIGHTFACE_MODEL=buffalo_l
+FACE_API_KEY=<secreto>
+```
+
+El backend Render debe apuntar a la URL de Railway mediante
+`FACE_SERVICE_URL`. Para validar un deployment se deben observar, en este
+orden:
+
+```text
+startup completo
+GET /ready 200
+POST /face/quality 200
+POST /face/compare 200
+```
+
+## Desarrollo local
 
 ```bash
-curl -s -X POST http://localhost:8000/face/compare \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: <backend-only-key>" \
-  -d '{"document_face": "<base64>", "selfie": "<base64>"}'
+cd backend/face-service
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m compileall app
+uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
-## Errors
-
-Request-time failures never leak content and never approve: they return
-HTTP 200 with `action: "NEEDS_REVIEW"` and `reason: "error"`
-(fail-closed). Only health/config failures (e.g. `insightface` missing)
-surface as errors.
-
-## Tests
+Las pruebas Python se ejecutan con:
 
 ```bash
-pytest        # mocked model, no weights, no network
+pytest -q
 ```
 
-## Limitations
+## Calibración reproducible
 
-- Single best face per image; multi-face handling is out of scope.
-- `/face/quality` y `/face/compare` requieren `FACE_API_KEY`; sin clave el
-  servicio responde 503 y una clave ausente o incorrecta responde 401.
-  `/health` permanece público y no revela secretos. No usa CORS: el frontend
-  nunca llama a este servicio.
-- Render free duerme por inactividad, PostgreSQL free vence a los 30 días y
-  el media/modelo local es efímero. La API key nunca se publica al frontend.
-- `FaceAnalysis.prepare(ctx_id=0)` uses the default InsightFace backend
-  (onnxruntime; CPU when no GPU is available).
+El porcentaje de Python y el porcentaje visual de OpenCode no deben calibrarse
+con intuición ni con un único caso. El repositorio incluye una herramienta que
+trabaja sólo con scores anonimizados ya calculados; no recibe imágenes ni PII.
+
+El CSV debe tener este formato:
+
+```csv
+label,biometric_percent,ai_percent
+same_person,82,88
+same_person,76,81
+different_person,24,91
+different_person,18,12
+```
+
+Ejecutar:
+
+```bash
+python scripts/calibrate_thresholds.py calibration_scores.csv
+```
+
+La herramienta busca el piso biométrico y el umbral combinado que maximizan la
+balanced accuracy del conjunto recibido. El resultado es una recomendación;
+no modifica variables de producción automáticamente. Debe validarse con casos
+representativos de la población, iluminación, dispositivos, documentos y
+condiciones de captura reales.
+
+El valor inicial de seguridad del backend es:
+
+```text
+KYC_FACE_MIN_BIOMETRIC_PERCENT=30
+```
+
+Un promedio superior a 50 no puede aprobar si el score biométrico no supera ese
+piso independiente.
+
+Si `pytest` no existe en el entorno, se debe instalar la dependencia de
+desarrollo o delegar la ejecución al pipeline de CI. `compileall` sólo valida
+sintaxis; no reemplaza las pruebas de comportamiento.
+
+## Privacidad
+
+- Nunca registrar base64, imágenes, embeddings o cuerpos de request.
+- No aceptar URLs de imágenes como sustituto del payload controlado.
+- No almacenar el resultado crudo de un proveedor externo en este servicio.
+- Mantener `FACE_API_KEY` sólo como secreto de runtime.
+- Transportar el tráfico desde NestJS mediante HTTPS en producción.

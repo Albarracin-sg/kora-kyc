@@ -1,172 +1,410 @@
-# Kora KYC
+# Kora KYC — plataforma de verificación de identidad
 
-Kora KYC es una prueba técnica que presenta un MVP móvil de verificación de identidad. Permite que una persona cree una sesión, se autentique, capture su cédula y una selfie, y reciba un resultado de validación documental mediante un proveedor configurado en backend y comparación facial local o delegada a `face_service`. El objetivo es mostrar una base técnica clara para un flujo KYC, no sustituir una plataforma de cumplimiento normativo ni un proveedor de identidad de producción.
+Kora es un MVP de verificación de identidad compuesto por una aplicación
+móvil Expo y un backend NestJS. El usuario captura el frente y el reverso de
+una cédula colombiana, realiza una ráfaga de selfies candidatas y recibe el resultado de una
+verificación que combina:
 
-## Alcance del MVP
+1. Validación documental con OpenCode Go.
+2. Comparación biométrica con InsightFace en un servicio Python.
+3. Una segunda opinión visual de OpenCode Go usando el frente de la cédula y
+   la selfie candidata seleccionada.
+4. Un promedio persistido de los dos porcentajes faciales calculado sobre la
+   misma selfie seleccionada.
 
-El problema abordado es la verificación inicial de identidad en una aplicación móvil con una integración documental externa controlada desde el backend y sin infraestructura AWS. El MVP cubre captura guiada, extracción estructurada de documento, comparación facial local o remota mediante `face_service`, persistencia del caso y consulta de su resultado.
+El backend es la autoridad del sistema. El frontend sólo captura evidencia,
+consume la API y presenta el estado; no contiene secretos ni implementa reglas
+de aprobación.
 
-Quedan fuera del alcance la prueba de vida, la detección de suplantación, la autenticidad documental certificada y la decisión regulatoria final.
+> **Estado de seguridad:** este proyecto no implementa prueba de vida ni
+> protección anti-spoofing. La comparación facial es una señal de similitud de
+> imágenes y no demuestra que una persona esté físicamente presente.
 
-## Capacidades principales
+## Índice de documentación
 
-- Registro e inicio de sesión mediante una API autenticada con JWT.
-- Creación y seguimiento de un caso KYC por usuario.
-- Captura de la cédula por ambos lados (frente y reverso) con cámara trasera y selfie con cámara frontal.
-- Extracción estructurada y validación documental de cédulas mediante un proveedor configurado exclusivamente en el backend.
-- Comparación facial con Human/TFJS local o mediante el `face_service` explícitamente configurado.
-- Estados explícitos del proceso y resultado consultable desde el perfil.
-- Presentación en el perfil de datos documentales tipados, incluyendo `NUIP / ID`, tipo de sangre y lugar de nacimiento cuando sean legibles; la nacionalidad colombiana se deriva sólo del tipo confirmado y no se extrae por OCR.
-- Almacenamiento privado de imágenes y validaciones de archivos antes de procesarlos.
-- Documentación de la API autoservida con Scalar sobre el esquema OpenAPI del backend.
-- Procesamiento de fallo cerrado: una evidencia, modelo o procesamiento inválido no puede producir una aprobación.
+La documentación está separada para que cada lector pueda profundizar sin
+perder el contexto general:
+
+- [Backend: API, worker, proveedores, base de datos y seguridad](backend/README.md)
+- [Frontend: captura, navegación, API, perfil e historial](frontend/README.md)
+- [Servicio facial Python: FastAPI, InsightFace y despliegue](backend/face-service/README.md)
+- [Configuración de despliegue](render.yaml)
+- [Guía de agentes y límites arquitectónicos](AGENTS.md)
+
+## Inicio rápido
+
+El repositorio **no es un workspace de Node**. Cada aplicación tiene su propio
+gestor de paquetes y sus propios comandos.
+
+### Backend
+
+```bash
+cd backend
+pnpm install
+pnpm prisma:generate
+pnpm prisma migrate deploy
+pnpm start:dev
+```
+
+### Frontend
+
+```bash
+cd frontend
+bun install
+bun start
+```
+
+### Servicio facial
+
+```bash
+cd backend/face-service
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m compileall app
+uvicorn app.main:app --host 0.0.0.0 --port 8080
+```
+
+Los comandos se ejecutan dentro de la aplicación correspondiente. No se deben
+instalar dependencias, crear `node_modules` ni crear lockfiles en la raíz.
 
 ## Arquitectura general
 
 ```text
-Usuario
-  │
-  ▼
-Aplicación móvil Expo (Android / iOS)
-  ├── Registro, inicio de sesión y perfil
-  ├── Captura de cédula (frente y reverso) y selfie con permiso de cámara
-  └── Consulta del estado y resultado KYC
-  │ HTTPS / API autenticada con JWT
-  ▼
-Backend NestJS
-  ├── Autenticación, autorización y propiedad por usuario
-  ├── Orquestación de estados KYC y validación de archivos
-  ├── Almacenamiento privado de imágenes
-   ├── Proveedor documental configurado para extracción estructurada
-  ├── Detección y embeddings faciales con Human/TFJS o face_service
-  └── Prisma
-  │
-  ▼
-PostgreSQL
-  └── Usuarios, casos KYC, estados y resultados
+┌─────────────────────────────┐
+│ Expo / React Native          │
+│ Cámara · perfil · historial  │
+└──────────────┬──────────────┘
+               │ HTTPS + JWT
+               ▼
+┌─────────────────────────────┐
+│ NestJS en Render             │
+│ API · auth · worker · reglas │
+└───────┬───────────┬─────────┘
+        │           │
+        │           ├── PostgreSQL mediante Prisma
+        │           └── Backblaze B2 privado
+        │
+        ├── OpenCode Go: documentos
+        ├── OpenCode Go: resumen dual FRONT + SELFIE
+        └── Railway: FastAPI + InsightFace
 ```
 
-La aplicación móvil captura y presenta información; el backend es la autoridad para autenticación, reglas de transición, procesamiento, persistencia y protección de los archivos.
+| Componente | Responsabilidad | Por qué existe |
+| --- | --- | --- |
+| `frontend/` | Capturar imágenes, mostrar estados y consultar la API | Mantiene la lógica sensible fuera del dispositivo |
+| `backend/` | Autenticación, transición KYC, almacenamiento, worker y decisión | Centraliza la autoridad y evita reglas divergentes |
+| `backend/face-service/` | Calidad facial, embeddings y similitud biométrica | Aísla dependencias pesadas de Python/InsightFace |
+| OpenCode Go | Extracción documental y explicación visual complementaria | Usa el proveedor configurado sin mover claves al frontend |
+| PostgreSQL | Estado, metadatos, campos tipados, métricas e historial | Permite auditoría y consultas consistentes |
+| Backblaze B2 | Persistencia privada de documentos y selfies | Evita guardar imágenes sensibles en el filesystem efímero |
+| Render | Ejecutar el backend NestJS | Servicio HTTP principal |
+| Railway | Ejecutar el servicio Python siempre activo | Evita cargar el modelo facial en cada solicitud |
 
-## Estructura del repositorio
+En producción, `FACE_SERVICE_URL` apunta al servicio Python de Railway. El
+blueprint conserva configuración compatible para el servicio facial antiguo de
+Render, pero no es el servicio usado por el backend cuando la variable apunta a
+Railway.
+
+### Diagrama de componentes
+
+```mermaid
+flowchart LR
+    F[Aplicación Expo] -->|HTTPS y JWT| B[API NestJS en Render]
+    B --> P[(PostgreSQL)]
+    B --> S[(Backblaze B2 privado)]
+    B --> O[OpenCode Go]
+    B --> R[Servicio facial en Railway]
+    R --> M[InsightFace buffalo_l]
+```
+
+El frontend sólo conoce la API NestJS. PostgreSQL, B2, OpenCode y Railway no se
+exponen directamente al dispositivo.
+
+## Flujo completo de una verificación
+
+### 1. Captura de evidencia
+
+El frontend guía al usuario por cuatro pasos:
+
+1. **Frente:** evidencia `FRONT` de la cédula.
+2. **Reverso:** evidencia `BACK`.
+3. **Rostro:** evidencia `SELFIE`.
+4. **Validación:** el backend procesa la verificación.
+
+La captura de selfie utiliza una previsualización acotada a 4:3 y un marco
+ovalado que evita cortar la parte inferior del rostro. La fotografía final usa
+la resolución segura confirmada por `expo-camera`.
+
+### 2. Almacenamiento privado
+
+Cada imagen se valida en el backend por tamaño, dimensiones, tipo y contenido.
+El objeto se guarda en B2 y PostgreSQL conserva únicamente el metadato y la
+clave interna. El frontend nunca recibe credenciales de B2 ni una URL pública.
+
+### 3. Clasificación documental
+
+OpenCode Go recibe las imágenes documentales etiquetadas como `FRONT`, `BACK` o
+`COMBINED`. Devuelve una respuesta estructurada que el backend valida antes de
+persistirla.
+
+Debe identificar una cédula colombiana (`COLOMBIAN_CEDULA`). Si el usuario sube
+una licencia, pasaporte, foto aleatoria, pantalla, reverso aislado u otro
+objeto, el proceso no debe aprobar. El frontend presenta, según el código:
+
+> **Lo que subiste no es una cédula.**
+
+La extracción documental no recibe la selfie. Existe una llamada separada de
+comparación visual que sí recibe el frente confirmado y la selfie, porque su
+objetivo es comparar rostros y generar una explicación.
+
+### 4. Comparación facial doble
+
+El worker selecciona el frente de la cédula —o un `COMBINED` confirmado cuando
+corresponde— y lo compara con la selfie mediante dos señales:
+
+#### Señal biométrica técnica
+
+El backend llama a Railway:
 
 ```text
-.
-├── README.md              # Presentación, alcance y ruta de revisión del repositorio
-├── AGENTS.md              # Reglas operativas y límites para agentes de IA
-├── backend/               # API NestJS, Prisma, PostgreSQL e IA local
-│   └── infra/             # Artefactos de infraestructura del backend
-└── frontend/              # Aplicación Expo para Android e iOS
+POST /face/quality
+POST /face/compare
 ```
 
-La raíz es un punto de documentación y coordinación, no un workspace de Node.js. Cada aplicación gestiona sus dependencias y comandos de manera independiente dentro de su propio directorio.
+Python/InsightFace detecta rostros, verifica calidad, genera embeddings y
+calcula similitud coseno. Esta señal se guarda en `faceSimilarity` como un
+valor normalizado de `0..1` y se muestra como porcentaje.
 
-## Flujo de usuario KYC
+#### Señal visual complementaria de IA
 
-1. **Sesión:** la persona abre la aplicación y accede al flujo de autenticación.
-2. **Registro o inicio de sesión:** crea una cuenta o inicia sesión; la API emite el JWT que autoriza las solicitudes posteriores.
-3. **Inicio del caso:** la persona crea un caso KYC, inicialmente en estado `CREATED`.
-4. **Captura de cédula:** concede permiso de cámara, captura el frente de la cédula, luego el reverso, y los carga; si el backend acepta los archivos el caso pasa a `DOCUMENT_UPLOADED`.
-5. **Captura de selfie:** captura la selfie con la cámara frontal; el caso pasa a `SELFIE_UPLOADED`.
-6. **Procesamiento:** el backend inicia la validación en `VALIDATING`, valida la respuesta estructurada del proveedor documental configurado para la cédula y ejecuta detección facial y comparación facial local o mediante `face_service`, según la configuración.
-7. **Estados finales:** el proceso concluye en `APPROVED`, `REJECTED`, `NEEDS_REVIEW` o `PROCESSING_FAILED`. Todos son terminales.
-8. **Resultado y perfil:** la aplicación consulta el estado y presenta el resultado del caso en el perfil de la persona autenticada.
+OpenCode Go recibe ambas imágenes y devuelve un JSON estricto con:
 
-## Procesamiento documental, IA y comportamiento de fallo cerrado
+```json
+{
+  "verdict": "same_person",
+  "similarity_percent": 90,
+  "summary": "La estructura facial presenta coincidencias fuertes; la similitud visual aproximada es 90%."
+}
+```
 
-El procesamiento de identidad se realiza en el backend con un proveedor documental configurado y una comparación facial local o remota:
+El resumen se limita a texto breve en español y no debe repetir nombres,
+números de documento ni OCR. Su porcentaje es una estimación visual, no una
+probabilidad biométrica calibrada.
 
-| Componente | Responsabilidad |
-|---|---|
-| Proveedor documental configurado | Extrae campos estructurados y evalúa la legibilidad documental de la cédula mediante una credencial exclusiva del backend. Gemini permanece como predeterminado; Hugging Face exige selección y configuración explícitas. |
-| Human con TensorFlow.js | Detecta rostros y genera embeddings faciales. |
-| Comparación facial | Compara los embeddings del documento y la selfie localmente con Human/TFJS o, si se selecciona `face_service`, delega la comparación al servicio facial remoto. |
+#### Promedio final
 
-Un proveedor documental externo (Gemini o Hugging Face) puede recibir únicamente las imágenes JPEG normalizadas de cédula etiquetadas `FRONT`, `BACK` o `COMBINED`; nunca recibe la selfie. Cuando la comparación facial es local, la selfie permanece en Human/TFJS dentro del backend. Cuando se selecciona `FACE_VERIFICATION_PROVIDER=face_service`, el backend envía por HTTPS al servicio facial remoto únicamente la imagen `FRONT` o `COMBINED` confirmada por el proveedor documental, junto con la selfie; nunca envía `BACK`. Si cualquiera de los dos proveedores es externo, la app solicita consentimiento explícito para `remote-verification-v2` antes de iniciar la captura. La operación debe evaluar los requisitos aplicables de privacidad y transferencia de datos. Las credenciales se configuran sólo en `backend/.env` o en el gestor seguro de secretos; nunca llegan al frontend, logs, base de datos o respuestas HTTP. `KYC_DOCUMENT_PROVIDER=gemini` mantiene Gemini como opción predeterminada, `KYC_DOCUMENT_PROVIDER=huggingface` exige token y modelo/proveedor explícitos, y `KYC_DOCUMENT_PROVIDER=local` habilita Tesseract sólo de forma explícita para desarrollo o pruebas. Consulte la [guía del backend](./backend/README.md) para el procedimiento de activación seguro.
+Cuando existen los dos valores:
 
-Los assets de Human/TFJS se preparan mediante el backend y se validan con un manifiesto de checksums. Si falta un asset, su integridad no es válida, el proveedor documental devuelve una respuesta inválida, una imagen no puede procesarse o una comprobación requerida falla, el caso termina como error o resultado no aprobatorio. No existe una ruta de degradación que apruebe el caso automáticamente.
+```text
+biométrica = faceSimilarity × 100
+promedio = (biométrica + faceAiSimilarityPercent) / 2
+```
 
-El face matching es local por defecto (Human/TFJS) y puede delegarse a `face_service` según la configuración del backend. En el modo remoto sólo se transmite `FRONT` o `COMBINED` junto con la selfie; `BACK` nunca se envía al servicio facial. No implementa liveness, detección anti-spoofing ni una aprobación biométrica certificada. Ningún proveedor documental se usa para aprobar biometría facial.
+La regla final es deliberadamente simple, pero exige un piso biométrico
+independiente para evitar que la IA compense una biometría demasiado baja:
 
-## Seguridad y privacidad
+- Biometría `>= KYC_FACE_MIN_BIOMETRIC_PERCENT` y `promedio > 50`:
+  `APPROVED`, `same_person`.
+- `promedio <= 50`: `REJECTED`, `different_person`.
+- Biometría debajo del piso: `NEEDS_REVIEW`, sin aprobación automática.
+- Falta uno de los dos valores: `NEEDS_REVIEW`; nunca se inventa el porcentaje.
 
-- La autenticación usa JWT; cada operación KYC se autoriza en el backend.
-- Los casos y sus archivos pertenecen al usuario autenticado; no deben exponerse entre usuarios.
-- Las imágenes de documentos y selfies se conservan en almacenamiento privado, sin rutas públicas de descarga.
-- El backend valida tamaño, dimensiones, tipo declarado y contenido mediante magic bytes antes de procesar archivos.
-- Documentos, selfies, hashes, tokens, credenciales y resultados KYC se tratan como PII confidencial y no deben registrarse en logs.
-- La procedencia documental almacena sólo proveedor y modelo; no almacena credenciales, OCR ni PII crudo devuelto por el proveedor documental.
-- `KYC_DOCUMENT_HASH_PEPPER` es un secreto independiente de `JWT_SECRET`.
-- El almacenamiento local es apropiado para el MVP y para entornos controlados; no reemplaza una política formal de retención, borrado, respaldo, cifrado gestionado o respuesta a incidentes.
+Ejemplo:
 
-## Capa de seguridad HTTP
+```text
+Biométrica: 28%
+IA:         90%
+Promedio:   59%
+Resultado:  APPROVED — misma persona
+```
 
-El backend aplica una capa de seguridad defensiva sin cambiar la lógica de dominio KYC:
+El promedio se calcula y persiste en el backend. El frontend no lo recalcula
+para tomar decisiones; sólo lo presenta.
 
-- **Helmet**: cabeceras HTTP seguras globales con una Content-Security-Policy controlada que permite servir la documentación autoservida (Scalar `/docs` y Swagger `/api`).
-- **Rate limiting** (`@nestjs/throttler`): tres límites independientes y configurables, con límite estricto en los endpoints públicos de autenticación, límite moderado en las subidas KYC y límite general para el resto. La documentación no se limita. Al superar un límite se responde `429` con `Retry-After`.
-- **Logging y filtro de errores**: un logger HTTP registra método, ruta, estado, duración e IP sin cuerpos, multipart ni respuestas; un filtro de excepciones central devuelve un JSON consistente sin exponer stack traces ni detalle interno en producción.
+### Diagrama de decisión facial
 
-Estos controles reemplazan la ausencia previa de rate limiting y HTTP hardening en el MVP. Los detalles, las variables de entorno y cómo probar el `429` están documentados en el [README del backend](./backend/README.md).
+```mermaid
+flowchart TD
+    A[Frente de cédula y selfie disponibles] --> B[OpenCode Go: análisis visual]
+    A --> C[Python: control de calidad]
+    C --> D{Ambos rostros utilizables}
+    D -->|No| E[NEEDS_REVIEW sin promedio]
+    D -->|Sí| F[Python: similitud biométrica]
+    B --> G{Porcentaje de IA válido}
+    G -->|No| E
+    G -->|Sí| H[Promedio de ambos porcentajes]
+    F --> H
+    H --> I{Promedio mayor que 50}
+    I -->|Sí| J[APPROVED: misma persona]
+    I -->|No| K[REJECTED: personas diferentes]
+```
 
-## Stack técnico
+## Estados de negocio
 
-| Área | Tecnología | Motivo |
-|---|---|---|
-| API | NestJS con TypeScript | Estructura modular para autenticación, validación y orquestación KYC. |
-| Persistencia | Prisma y PostgreSQL | Modelo de datos tipado y persistencia relacional de usuarios y casos. |
-| Dependencias del backend | pnpm | Instalación aislada y reproducible dentro de `backend/`. |
-| Cliente móvil | Expo managed con React Native | Una aplicación móvil para Android e iOS con acceso a cámara. |
-| Ejecución del frontend | Bun | Gestor y entorno definidos para `frontend/`. |
+```text
+CREATED
+  → DOCUMENT_UPLOADED
+  → SELFIE_UPLOADED
+  → VALIDATING
+  → APPROVED
+  → REJECTED
+  → NEEDS_REVIEW
+  → PROCESSING_FAILED
+```
 
-El frontend no incluye destino web. La prueba se enfoca en Android e iOS.
+Las cuatro últimas salidas son terminales. El estado `NEEDS_REVIEW` significa
+que el sistema no pudo tomar una decisión automatizada completa con evidencia
+suficiente. No significa aprobación.
 
-## Inicio rápido
+Reglas de evidencia documental:
 
-Ejecute los comandos desde el directorio de cada aplicación; no instale dependencias ni ejecute gestores de paquetes en la raíz.
+- `FRONT` y `BACK` son la ruta normal.
+- Sólo puede existir una imagen por lado.
+- Una nueva carga del mismo lado reemplaza la evidencia anterior.
+- `COMBINED` agrupa ambos lados y no puede coexistir con `FRONT` o `BACK`.
+- Falta de lado, cobertura incompleta o lectura privada fallida termina en
+  revisión o fallo cerrado.
+- El reverso nunca se usa para comparar rostros.
 
-1. Consulte el [README del backend](./backend/README.md) para requisitos, variables de entorno, assets locales, generación de Prisma, migraciones e inicio de la API.
-2. Consulte el [README del frontend](./frontend/README.md) para Bun, configuración de `EXPO_PUBLIC_API_URL`, permisos de cámara y ejecución en Android o iOS.
-3. En un dispositivo físico, configure una URL de API alcanzable desde el dispositivo; no use `localhost`.
+## Persistencia y pantallas
 
-## Verificación realizada
+`KycVerification` conserva el resultado técnico, el resultado complementario y
+el resultado combinado:
 
-Se verificaron los siguientes comandos en sus directorios correspondientes:
+```text
+faceDistance
+faceSimilarity
+faceAiVerdict
+faceAiSimilarityPercent
+faceAiSummary
+faceAiProvider
+faceAiProviderModel
+faceCombinedSimilarityPercent
+faceCombinedVerdict
+```
 
-| Área | Verificaciones realizadas |
-|---|---|
-| Backend | Tests, compilación y generación del cliente Prisma. |
-| Frontend | Tests y comprobación de tipos. |
+Estos valores se exponen de forma controlada en:
 
-Docker y Docker Compose no se ejecutaron como parte de esta entrega por decisión del usuario. La infraestructura permanece documentada en `backend/infra/`, pero no forma parte de la evidencia de ejecución de esta prueba.
+- Home: estado final de la verificación.
+- Perfil: detalle de la verificación actual.
+- Resultado: estado y desglose después de procesar.
+- Historial: lista y detalle de verificaciones anteriores.
 
-## Limitaciones honestas del MVP
+Las imágenes de evidencia se abren desde el detalle en un visor privado de
+pantalla completa con cierre, desplazamiento y controles de zoom.
 
-- No implementa liveness ni detección anti-spoofing.
-- No verifica la autenticidad documental ante una fuente oficial ni detecta fraudes documentales de forma certificada.
-- No define una política formal de retención, eliminación o conservación de evidencia.
-- No se realizó una prueba de integración end-to-end con PostgreSQL en esta ejecución.
-- Las pruebas disponibles no sustituyen una validación de integración completa del controlador, el worker y la base de datos.
+## Despliegue
 
-## Guion breve para una demo de entrevista
+### Backend en Render
 
-1. Presentar el problema: una validación de identidad móvil con proveedor documental configurable, comparación facial local o remota y controles explícitos de privacidad.
-2. Registrar una cuenta o iniciar sesión y crear un caso KYC.
-3. Mostrar la captura guiada de la cédula y la selfie, incluyendo el permiso de cámara.
-4. Explicar la transición de estados, la extracción documental exclusivamente en backend con proveedor explícitamente configurado y la comparación facial local o remota según configuración.
-5. Consultar el resultado desde el perfil y destacar que el backend impone la propiedad por usuario y el comportamiento de fallo cerrado.
-6. Cerrar con los límites del MVP y las mejoras requeridas para un entorno productivo.
+El backend se construye desde `/backend` con `backend/infra/Dockerfile`. Las
+migraciones pendientes se ejecutan antes de iniciar la aplicación.
 
-## Siguientes mejoras priorizadas
+Variables de selección —sin valores sensibles—:
 
-1. Incorporar pruebas de integración con PostgreSQL y pruebas end-to-end del flujo móvil a la API.
-2. Profundizar observabilidad segura, supervisión de límites y una política formal de retención y borrado de PII.
-3. Implementar liveness y controles anti-spoofing con evaluación de seguridad y sesgos.
-4. Integrar verificación documental con fuentes autorizadas y revisión manual auditable cuando corresponda.
-5. Definir cifrado, gestión de claves, respaldo y respuesta a incidentes para una operación productiva.
+```text
+FILE_STORAGE_PROVIDER=b2
+B2_BUCKET_NAME=kora-storage
+KYC_DOCUMENT_PROVIDER=opencode-go
+FACE_VERIFICATION_PROVIDER=face_service
+FACE_SERVICE_URL=https://kora-kyc-production.up.railway.app
+FACE_SERVICE_TIMEOUT_MS=120000
+FACE_API_KEY=<secreto compartido con Railway>
+KYC_FACE_MIN_BIOMETRIC_PERCENT=30
+```
 
-## Documentación específica
+### Servicio facial en Railway
 
-- [Guía del backend](./backend/README.md)
-- [Guía del frontend](./frontend/README.md)
-- [Reglas para agentes de IA](./AGENTS.md)
+El servicio se construye desde `/backend/face-service`, descarga el modelo
+durante el build y queda listo mediante `/ready`. La configuración actual usa:
+
+```text
+INSIGHTFACE_MODEL=buffalo_l
+FACE_API_KEY=<secreto privado>
+```
+
+El warning de `CUDAExecutionProvider` es esperado cuando la instancia no tiene
+GPU. InsightFace continúa usando `CPUExecutionProvider`.
+
+### PostgreSQL y B2
+
+PostgreSQL se conecta mediante `DATABASE_URL` y Prisma. B2 se configura con
+`B2_BUCKET_NAME`, `B2_KEY_ID` y `B2_APPLICATION_KEY`. El bucket debe permanecer
+privado.
+
+## Desarrollo guiado por especificaciones (SDD)
+
+La implementación se organizó con el flujo SDD —Spec-Driven Development— para
+evitar que la lógica se repartiera de manera improvisada entre aplicaciones:
+
+```text
+explore → proposal → spec → design → tasks → apply → verify → archive
+```
+
+La intención de cada etapa fue:
+
+1. **Explore:** entender el código actual, las restricciones de privacidad y
+   los puntos de integración.
+2. **Proposal:** establecer el resultado de producto, el alcance y los no
+   objetivos.
+3. **Spec:** convertir el alcance en requisitos y escenarios comprobables.
+4. **Design:** definir límites entre frontend, backend, Python, OpenCode, B2 y
+   PostgreSQL.
+5. **Tasks:** ordenar migraciones, contratos, implementación, UI y validación.
+6. **Apply:** implementar por unidades coherentes.
+7. **Verify:** ejecutar pruebas, typecheck, build y comprobaciones de contrato.
+8. **Archive:** registrar el estado final y las decisiones relevantes.
+
+### Diagrama del ciclo SDD
+
+```mermaid
+flowchart LR
+    A[Explorar] --> B[Proponer]
+    B --> C[Especificar]
+    C --> D[Diseñar]
+    D --> E[Planificar tareas]
+    E --> F[Implementar]
+    F --> G[Verificar]
+    G --> H[Archivar]
+```
+
+La razón de usar SDD fue especialmente importante aquí: el cambio combinaba
+PII, dos proveedores de visión, una migración de datos, un worker asíncrono,
+servicios desplegados separadamente y cambios de presentación en varias
+pantallas.
+
+## Validación local
+
+```bash
+# Backend
+cd backend
+pnpm test
+pnpm build
+
+# Frontend
+cd ../frontend
+bun run typecheck
+bun test
+
+# Servicio Python
+cd ../backend/face-service
+python -m compileall app
+pytest -q
+```
+
+Si `pytest` no está instalado localmente, debe ejecutarse en el entorno de CI o
+instalar las dependencias de desarrollo del servicio facial.
+
+## Seguridad y límites
+
+- Nunca subir `.env`, secretos, URLs de base de datos, tokens, imágenes ni
+  respuestas crudas de proveedores.
+- Rotar inmediatamente cualquier credencial expuesta en chat, logs o commits.
+- No registrar cuerpos HTTP, base64, selfies, documentos, embeddings u OCR.
+- Mantener separados `JWT_SECRET` y `KYC_DOCUMENT_HASH_PEPPER`.
+- No transmitir la selfie al extractor documental; sólo a la comparación facial
+  explícita.
+- No agregar fallbacks que aprueben ante error, timeout, modelo ausente o
+  respuesta inválida.
+- No incorporar AWS ni infraestructura AWS.

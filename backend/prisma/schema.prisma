@@ -117,10 +117,12 @@ model KycImage {
   width          Int
   height         Int
   sha256         String
+  captureIndex   Int          @default(0)
+  selectedForVerification Boolean @default(true)
   createdAt      DateTime     @default(now())
   verification   KycVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
 
-  @@unique([verificationId, kind, side])
+  @@unique([verificationId, kind, side, captureIndex])
   @@index([verificationId])
 }
 
