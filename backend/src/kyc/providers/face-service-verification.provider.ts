@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import {
   APP_ENVIRONMENT,
   type AppConfiguration,
@@ -26,11 +26,50 @@ export interface FaceServiceFetch {
   (input: string, init: RequestInit): Promise<FaceServiceFetchResponse>;
 }
 
+export interface FaceServiceSleep {
+  (delayMs: number): Promise<void>;
+}
+
 const GLOBAL_FETCH: FaceServiceFetch = (input, init) => fetch(input, init);
+const sleep: FaceServiceSleep = (delayMs) =>
+  new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+
+export const FACE_SERVICE_RETRY = {
+  MAX_ATTEMPTS: 3,
+  BACKOFF_MS: [250, 500],
+} as const;
+
+const FACE_SERVICE_RETRYABLE_STATUS = {
+  BAD_GATEWAY: 502,
+  SERVICE_UNAVAILABLE: 503,
+  GATEWAY_TIMEOUT: 504,
+} as const;
+
+type FaceServiceRetryReason = "network_or_timeout" | "server_gateway";
+
+export function isRetryableFaceServiceStatus(status: number): boolean {
+  return (
+    status === FACE_SERVICE_RETRYABLE_STATUS.BAD_GATEWAY ||
+    status === FACE_SERVICE_RETRYABLE_STATUS.SERVICE_UNAVAILABLE ||
+    status === FACE_SERVICE_RETRYABLE_STATUS.GATEWAY_TIMEOUT
+  );
+}
+
+class FaceServiceTimeoutError extends Error {
+  constructor() {
+    super("Face service request timed out");
+    this.name = "FaceServiceTimeoutError";
+  }
+}
 
 interface FaceServiceRequest {
   document_face: string;
   selfie: string;
+}
+
+interface FaceServiceRequestResult {
+  response: FaceServiceFetchResponse;
+  responseText: string | null;
 }
 
 interface FaceServiceQualityItem {
@@ -352,15 +391,19 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
   private readonly faceServiceTimeoutMs: number;
   private readonly faceApiKey: string;
   private readonly faceMinimumSimilarity: number;
+  private readonly logger = new Logger(FaceServiceVerificationProvider.name);
+  private readonly sleepImplementation: FaceServiceSleep;
 
   constructor(
     configuration: FaceServiceProviderConfiguration,
     private readonly fetchImplementation: FaceServiceFetch = GLOBAL_FETCH,
+    sleepImplementation: FaceServiceSleep = sleep,
   ) {
     this.faceServiceUrl = configuration.values.faceServiceUrl;
     this.faceServiceTimeoutMs = configuration.values.faceServiceTimeoutMs;
     this.faceApiKey = configuration.values.faceApiKey;
     this.faceMinimumSimilarity = configuration.values.faceMinimumSimilarity;
+    this.sleepImplementation = sleepImplementation;
 
     if (
       configuration.values.environment === APP_ENVIRONMENT.PRODUCTION &&
@@ -371,12 +414,18 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
   }
 
   async verify(documentImage: Buffer, selfieImage: Buffer): Promise<FaceVerificationResult> {
+    const deadline = Date.now() + this.faceServiceTimeoutMs;
     const request: FaceServiceRequest = {
       document_face: documentImage.toString("base64"),
       selfie: selfieImage.toString("base64"),
     };
 
-    const quality = await this.post(FACE_SERVICE_QUALITY_PATH, request, parseQualityResponse);
+    const quality = await this.post(
+      FACE_SERVICE_QUALITY_PATH,
+      request,
+      parseQualityResponse,
+      deadline,
+    );
     if (
       quality.document.quality !== FACE_SERVICE_QUALITY_CONTRACT.HIGH ||
       quality.document.action !== FACE_SERVICE_QUALITY_CONTRACT.OK
@@ -396,7 +445,12 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
       );
     }
 
-    const compare = await this.post(FACE_SERVICE_COMPARE_PATH, request, parseCompareResponse);
+    const compare = await this.post(
+      FACE_SERVICE_COMPARE_PATH,
+      request,
+      parseCompareResponse,
+      deadline,
+    );
     if (compare.quality_document !== FACE_SERVICE_QUALITY_CONTRACT.HIGH) {
       throw new FaceCaptureError(
         qualityFailureCode(FACE_SERVICE_QUALITY_SIDE.DOCUMENT, compare.reasons.document) ??
@@ -460,7 +514,68 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
     path: string,
     body: FaceServiceRequest,
     parse: (value: unknown) => T | null,
+    deadline: number,
   ): Promise<T> {
+    for (let attempt = 1; attempt <= FACE_SERVICE_RETRY.MAX_ATTEMPTS; attempt += 1) {
+      const remainingBudgetMs = deadline - Date.now();
+      if (remainingBudgetMs <= 0) {
+        throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE);
+      }
+
+      const attemptsRemaining = FACE_SERVICE_RETRY.MAX_ATTEMPTS - attempt + 1;
+      const attemptTimeoutMs = Math.max(
+        1,
+        Math.floor(remainingBudgetMs / attemptsRemaining),
+      );
+
+      try {
+        const { response, responseText } = await this.fetchOnce(path, body, attemptTimeoutMs);
+        if (!response.ok) {
+          if (!isRetryableFaceServiceStatus(response.status)) {
+            throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE);
+          }
+          if (attempt === FACE_SERVICE_RETRY.MAX_ATTEMPTS) {
+            throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE);
+          }
+
+          await this.waitBeforeRetry(path, attempt, "server_gateway", deadline);
+          continue;
+        }
+
+        let parsed: unknown;
+        let value: T | null;
+        try {
+          parsed = JSON.parse(responseText ?? "");
+          value = parse(parsed);
+        } catch {
+          throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
+        }
+
+        if (value === null) {
+          throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
+        }
+
+        return value;
+      } catch (error: unknown) {
+        if (error instanceof FaceCaptureError) {
+          throw error;
+        }
+        if (attempt === FACE_SERVICE_RETRY.MAX_ATTEMPTS || Date.now() >= deadline) {
+          throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE);
+        }
+
+        await this.waitBeforeRetry(path, attempt, "network_or_timeout", deadline);
+      }
+    }
+
+    throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE);
+  }
+
+  private async fetchOnce(
+    path: string,
+    body: FaceServiceRequest,
+    timeoutMs: number,
+  ): Promise<FaceServiceRequestResult> {
     const controller = new AbortController();
     let rejectTimeout: ((reason?: unknown) => void) | undefined;
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
@@ -468,8 +583,8 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
     });
     const timeout = setTimeout(() => {
       controller.abort();
-      rejectTimeout?.(new Error("Face service request timed out"));
-    }, this.faceServiceTimeoutMs);
+      rejectTimeout?.(new FaceServiceTimeoutError());
+    }, timeoutMs);
 
     try {
       const headers: Record<string, string> = {
@@ -485,35 +600,35 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
         }),
         timeoutPromise,
       ]);
-
       if (!response.ok) {
-        throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE);
+        return { response, responseText: null };
       }
 
       const responseText = await Promise.race([response.text(), timeoutPromise]);
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(responseText);
-      } catch {
-        throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
-      }
-
-      const value = parse(parsed);
-      if (value === null) {
-        throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
-      }
-
-      return value;
-    } catch (error: unknown) {
-      if (error instanceof FaceCaptureError) {
-        throw error;
-      }
-
-      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE);
+      return { response, responseText };
     } finally {
       clearTimeout(timeout);
       controller.abort();
     }
+  }
+
+  private async waitBeforeRetry(
+    path: string,
+    attempt: number,
+    reason: FaceServiceRetryReason,
+    deadline: number,
+  ): Promise<void> {
+    const remainingBudgetMs = deadline - Date.now();
+    if (remainingBudgetMs <= 0) {
+      return;
+    }
+
+    const backoffMs = FACE_SERVICE_RETRY.BACKOFF_MS[attempt - 1] ?? 0;
+    const delayMs = Math.min(backoffMs, remainingBudgetMs);
+    this.logger.warn(
+      `Face service transient failure path=${path} reason=${reason}; ` +
+        `retry=${attempt + 1}/${FACE_SERVICE_RETRY.MAX_ATTEMPTS}`,
+    );
+    await this.sleepImplementation(delayMs);
   }
 }

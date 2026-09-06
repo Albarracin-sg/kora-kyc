@@ -12,6 +12,7 @@ import pytest
 
 import app.face_service as fs
 from app.config import get_settings
+from app.face_service import analyzer_failure_reason, is_analyzer_ready
 
 
 def _stub_insightface(monkeypatch, fake_analyzer):
@@ -27,8 +28,10 @@ def _stub_insightface(monkeypatch, fake_analyzer):
 @pytest.fixture(autouse=True)
 def _reset_analyzer():
     fs._analyzer = None
+    fs._analyzer_initialization_error = None
     yield
     fs._analyzer = None
+    fs._analyzer_initialization_error = None
 
 
 def test_settings_expands_the_default_model_root(monkeypatch):
@@ -92,3 +95,40 @@ def test_get_analyzer_is_cached(monkeypatch):
 
     assert first is second
     assert len(created) == 1
+
+
+def test_preload_analyzer_marks_the_service_ready_after_success(monkeypatch):
+    created = []
+
+    def build_analyzer():
+        created.append(object())
+        return created[-1]
+
+    monkeypatch.setattr(fs, "_build_analyzer", build_analyzer)
+
+    analyzer = fs.preload_analyzer()
+
+    assert analyzer is created[0]
+    assert is_analyzer_ready() is True
+    assert fs.preload_analyzer() is analyzer
+    assert len(created) == 1
+
+
+def test_failed_preload_keeps_readiness_false_without_reinitializing(monkeypatch):
+    attempts = 0
+
+    def build_analyzer():
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("synthetic model initialization failure")
+
+    monkeypatch.setattr(fs, "_build_analyzer", build_analyzer)
+
+    with pytest.raises(RuntimeError, match="initialization failed"):
+        fs.preload_analyzer()
+    with pytest.raises(RuntimeError, match="previously failed"):
+        fs.preload_analyzer()
+
+    assert attempts == 1
+    assert is_analyzer_ready() is False
+    assert analyzer_failure_reason() == "InsightFace analyzer initialization failed"

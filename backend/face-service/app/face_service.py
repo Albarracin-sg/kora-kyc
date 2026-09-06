@@ -6,13 +6,14 @@ insightface, onnxruntime, numpy or opencv: they operate on plain
 sequences and duck-typed face objects, so the unit tests run without
 downloading any model weights.
 
-The real InsightFace pipeline is built lazily by `get_analyzer()`; the
-buffalo_l weights are downloaded on the first real request, never at
-import time and never in the test suite.
+The real InsightFace pipeline is prepared by `preload_analyzer()` during
+application startup.  `get_analyzer()` retains a guarded lazy path for
+isolated local callers and tests, never at module import time.
 """
 from __future__ import annotations
 
 import math
+from threading import Lock
 from dataclasses import dataclass
 from typing import Any, Optional, Sequence
 
@@ -346,21 +347,14 @@ def assess_image(
     return assessment.verdict, assessment.face
 
 
-# --- Real InsightFace pipeline (lazy) ---
+# --- Real InsightFace pipeline ---
 
 _analyzer: Any = None
+_analyzer_initialization_error: str | None = None
+_analyzer_initialization_lock = Lock()
 
 
-def get_analyzer() -> Any:
-    """Return a lazily-built, cached InsightFace FaceAnalysis pipeline.
-
-    The buffalo_l model weights are downloaded by `FaceAnalysis` on
-    first use - which happens only when a real request needs it, never
-    on import and never in the test suite.
-    """
-    global _analyzer
-    if _analyzer is not None:
-        return _analyzer
+def _build_analyzer() -> Any:
     settings = get_settings()
     try:
         from insightface.app import FaceAnalysis
@@ -369,7 +363,53 @@ def get_analyzer() -> Any:
             "insightface is not installed; run `pip install -r requirements.txt` "
             "to enable real face analysis (unit tests work without it)"
         ) from exc
+
     analyzer = FaceAnalysis(name=settings.model_name, root=settings.model_root)
     analyzer.prepare(ctx_id=0, det_size=settings.det_size)
-    _analyzer = analyzer
-    return _analyzer
+    return analyzer
+
+
+def analyzer_failure_reason() -> str | None:
+    """Return a safe, generic initialization failure state for diagnostics."""
+    return _analyzer_initialization_error
+
+
+def is_analyzer_ready() -> bool:
+    """Return true only after the InsightFace analyzer has prepared successfully."""
+    return _analyzer is not None
+
+
+def preload_analyzer() -> Any:
+    """Build and prepare the configured analyzer before serving biometric traffic."""
+    return get_analyzer()
+
+
+def get_analyzer() -> Any:
+    """Return a cached, safely initialized InsightFace FaceAnalysis pipeline.
+
+    Application startup calls this through `preload_analyzer()`.  The lazy
+    access remains useful for isolated tests and local callers, while the
+    lock prevents concurrent requests from constructing duplicate analyzers.
+    A failed initialization is retained as a generic failure state so the
+    service remains not-ready and does not repeatedly initialize in-process.
+    """
+    global _analyzer, _analyzer_initialization_error
+    if _analyzer is not None:
+        return _analyzer
+    if _analyzer_initialization_error is not None:
+        raise RuntimeError("InsightFace analyzer initialization previously failed")
+
+    with _analyzer_initialization_lock:
+        if _analyzer is not None:
+            return _analyzer
+        if _analyzer_initialization_error is not None:
+            raise RuntimeError("InsightFace analyzer initialization previously failed")
+
+        try:
+            analyzer = _build_analyzer()
+        except Exception as exc:
+            _analyzer_initialization_error = "InsightFace analyzer initialization failed"
+            raise RuntimeError(_analyzer_initialization_error) from exc
+
+        _analyzer = analyzer
+        return _analyzer

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   FACE_VERIFICATION_PROVIDER,
+  FILE_STORAGE_PROVIDER,
   KYC_DOCUMENT_PROVIDER,
   createAppConfiguration,
 } from "../src/config/app-config.service";
@@ -45,6 +46,59 @@ describe("createAppConfiguration storage root", () => {
     );
 
     expect(config.localStorageRoot).toBe(resolve(workingDirectory, "custom-storage"));
+  });
+
+  it("defaults file storage to local and ignores B2 settings unless selected", () => {
+    const config = createAppConfiguration(
+      { ...baseEnvironment(), B2_BUCKET_NAME: "unused-bucket" },
+      workingDirectory,
+    );
+
+    expect(config.fileStorageProvider).toBe(FILE_STORAGE_PROVIDER.LOCAL);
+    expect(config.b2KeyId).toBeNull();
+    expect(config.b2ApplicationKey).toBeNull();
+    expect(config.b2BucketName).toBeNull();
+  });
+
+  it("requires and parses the bucket-scoped B2 settings when B2 is selected", () => {
+    const config = createAppConfiguration(
+      {
+        ...baseEnvironment(),
+        FILE_STORAGE_PROVIDER: FILE_STORAGE_PROVIDER.B2,
+        B2_KEY_ID: "test-b2-key-id",
+        B2_APPLICATION_KEY: "test-b2-application-key",
+        B2_BUCKET_NAME: "kora-storage",
+      },
+      workingDirectory,
+    );
+
+    expect(config.fileStorageProvider).toBe(FILE_STORAGE_PROVIDER.B2);
+    expect(config.b2KeyId).toBe("test-b2-key-id");
+    expect(config.b2ApplicationKey).toBe("test-b2-application-key");
+    expect(config.b2BucketName).toBe("kora-storage");
+  });
+
+  it("rejects incomplete B2 settings only when B2 is selected", () => {
+    expect(() =>
+      createAppConfiguration(
+        {
+          ...baseEnvironment(),
+          FILE_STORAGE_PROVIDER: FILE_STORAGE_PROVIDER.B2,
+          B2_KEY_ID: "test-b2-key-id",
+          B2_BUCKET_NAME: "kora-storage",
+        },
+        workingDirectory,
+      ),
+    ).toThrow("Missing required environment variable: B2_APPLICATION_KEY");
+  });
+
+  it("rejects an unknown file storage provider", () => {
+    expect(() =>
+      createAppConfiguration(
+        { ...baseEnvironment(), FILE_STORAGE_PROVIDER: "s3" },
+        workingDirectory,
+      ),
+    ).toThrow("FILE_STORAGE_PROVIDER must be local or b2");
   });
 });
 

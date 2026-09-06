@@ -1,5 +1,10 @@
 jest.mock("@nestjs/common", () => ({
   Injectable: () => (): void => undefined,
+  Logger: class {
+    constructor(_context?: string) {}
+
+    warn(): void {}
+  },
 }));
 
 import {
@@ -14,10 +19,13 @@ import {
 import {
   FACE_SERVICE_COMPARE_PATH,
   FACE_SERVICE_QUALITY_PATH,
+  FACE_SERVICE_RETRY,
   FaceServiceVerificationProvider,
   calculateFaceServiceDistance,
   type FaceServiceFetch,
   type FaceServiceFetchResponse,
+  type FaceServiceSleep,
+  isRetryableFaceServiceStatus,
 } from "../src/kyc/providers/face-service-verification.provider";
 
 const BASE_ENVIRONMENT: NodeJS.ProcessEnv = {
@@ -153,12 +161,17 @@ function parseRequest(call: CapturedFetchCall | undefined): FaceServiceRequestBo
 function createProvider(
   fetchImplementation: FaceServiceFetch,
   environment: NodeJS.ProcessEnv = {},
+  sleepImplementation?: FaceServiceSleep,
 ): FaceServiceVerificationProvider {
   const configuration = createAppConfiguration(
     { ...BASE_ENVIRONMENT, ...environment },
     process.cwd(),
   );
-  return new FaceServiceVerificationProvider({ values: configuration }, fetchImplementation);
+  return new FaceServiceVerificationProvider(
+    { values: configuration },
+    fetchImplementation,
+    sleepImplementation,
+  );
 }
 
 function expectFaceCaptureError(
@@ -424,6 +437,72 @@ describe("Face service verification provider", () => {
     );
   });
 
+  it.each([502, 503, 504])("retries a transient gateway status (%s)", async (status) => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(status, "gateway unavailable"),
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(200, COMPARE_MATCH_RESPONSE),
+    );
+
+    const result = await createProvider(fetchStub.fetch, {}, async () => undefined).verify(
+      DOCUMENT_IMAGE,
+      SELFIE_IMAGE,
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(fetchStub.calls).toHaveLength(3);
+  });
+
+  it.each([400, 401, 403, 500])("does not retry non-transient HTTP status (%s)", async (status) => {
+    const fetchStub = createFetchStub(createFetchResponse(status, "request failed"));
+
+    await expectFaceCaptureError(
+      createProvider(fetchStub.fetch, {}, async () => undefined).verify(
+        DOCUMENT_IMAGE,
+        SELFIE_IMAGE,
+      ),
+      FACE_CAPTURE_FAILURE_CODE.FACE_SERVICE_UNAVAILABLE,
+    );
+
+    expect(fetchStub.calls).toHaveLength(1);
+  });
+
+  it("retries a network failure and then continues with the normal comparison", async () => {
+    let attempts = 0;
+    const fetchImplementation: FaceServiceFetch = async (
+      input: string,
+      init: RequestInit,
+    ): Promise<FaceServiceFetchResponse> => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("connection refused");
+      }
+      const response =
+        attempts === 2
+          ? createFetchResponse(200, QUALITY_OK_RESPONSE)
+          : createFetchResponse(200, COMPARE_MATCH_RESPONSE);
+      void input;
+      void init;
+      return response;
+    };
+
+    const result = await createProvider(fetchImplementation, {}, async () => undefined).verify(
+      DOCUMENT_IMAGE,
+      SELFIE_IMAGE,
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(attempts).toBe(3);
+  });
+
+  it("exposes only the configured gateway statuses as retryable", () => {
+    expect(isRetryableFaceServiceStatus(502)).toBe(true);
+    expect(isRetryableFaceServiceStatus(503)).toBe(true);
+    expect(isRetryableFaceServiceStatus(504)).toBe(true);
+    expect(isRetryableFaceServiceStatus(500)).toBe(false);
+    expect(isRetryableFaceServiceStatus(401)).toBe(false);
+  });
+
   it("fails closed when the face service is unreachable", async () => {
     const unreachableFetch: FaceServiceFetch = async (): Promise<FaceServiceFetchResponse> => {
       throw new Error("connection refused");
@@ -435,7 +514,7 @@ describe("Face service verification provider", () => {
     );
   });
 
-  it("aborts a timed-out request without retrying", async () => {
+  it("retries timed-out requests within the single bounded verification budget", async () => {
     jest.useFakeTimers();
     try {
       let fetchAttempts = 0;
@@ -460,7 +539,7 @@ describe("Face service verification provider", () => {
 
       await expectedTimeout;
 
-      expect(fetchAttempts).toBe(1);
+      expect(fetchAttempts).toBe(FACE_SERVICE_RETRY.MAX_ATTEMPTS);
     } finally {
       jest.useRealTimers();
     }

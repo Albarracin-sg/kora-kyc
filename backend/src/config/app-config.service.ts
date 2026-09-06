@@ -10,6 +10,14 @@ export const APP_ENVIRONMENT = {
 
 export type AppEnvironment = (typeof APP_ENVIRONMENT)[keyof typeof APP_ENVIRONMENT];
 
+export const FILE_STORAGE_PROVIDER = {
+  LOCAL: "local",
+  B2: "b2",
+} as const;
+
+export type FileStorageProviderName =
+  (typeof FILE_STORAGE_PROVIDER)[keyof typeof FILE_STORAGE_PROVIDER];
+
 const CONFIG_DEFAULTS = {
   environment: APP_ENVIRONMENT.DEVELOPMENT,
   port: 3000,
@@ -98,7 +106,11 @@ export interface AppConfiguration {
   refreshTokenTtlMs: number;
   bcryptRounds: number;
   corsOrigins: string[];
+  fileStorageProvider: FileStorageProviderName;
   localStorageRoot: string;
+  b2KeyId: string | null;
+  b2ApplicationKey: string | null;
+  b2BucketName: string | null;
   assetManifestPath: string;
   tesseractLangPath: string;
   humanModelsPath: string;
@@ -302,6 +314,30 @@ function readFaceVerificationProvider(
   throw new Error("FACE_VERIFICATION_PROVIDER must be local or face_service");
 }
 
+function readFileStorageProvider(environment: NodeJS.ProcessEnv): FileStorageProviderName {
+  const value = environment.FILE_STORAGE_PROVIDER?.trim() || FILE_STORAGE_PROVIDER.LOCAL;
+  if (value === FILE_STORAGE_PROVIDER.LOCAL || value === FILE_STORAGE_PROVIDER.B2) {
+    return value;
+  }
+
+  throw new Error("FILE_STORAGE_PROVIDER must be local or b2");
+}
+
+function readB2StorageConfiguration(
+  environment: NodeJS.ProcessEnv,
+  fileStorageProvider: FileStorageProviderName,
+): Pick<AppConfiguration, "b2KeyId" | "b2ApplicationKey" | "b2BucketName"> {
+  if (fileStorageProvider !== FILE_STORAGE_PROVIDER.B2) {
+    return { b2KeyId: null, b2ApplicationKey: null, b2BucketName: null };
+  }
+
+  return {
+    b2KeyId: requiredEnvironmentValue(environment, "B2_KEY_ID"),
+    b2ApplicationKey: requiredEnvironmentValue(environment, "B2_APPLICATION_KEY"),
+    b2BucketName: requiredEnvironmentValue(environment, "B2_BUCKET_NAME"),
+  };
+}
+
 function readFaceServiceUrl(
   environment: NodeJS.ProcessEnv,
   appEnvironment: AppEnvironment,
@@ -457,6 +493,8 @@ export function createAppConfiguration(
   );
   const assetsRoot = resolve(workingDirectory, environment.KYC_ASSETS_ROOT ?? "assets");
   const appEnvironment = readEnvironment(environment);
+  const fileStorageProvider = readFileStorageProvider(environment);
+  const b2StorageConfiguration = readB2StorageConfiguration(environment, fileStorageProvider);
   const documentProvider = readDocumentProvider(environment);
   const faceVerificationProvider = readFaceVerificationProvider(environment);
 
@@ -473,7 +511,9 @@ export function createAppConfiguration(
     ),
     bcryptRounds: readPositiveInteger(environment, "BCRYPT_ROUNDS", 12),
     corsOrigins: readOrigins(environment),
+    fileStorageProvider,
     localStorageRoot,
+    ...b2StorageConfiguration,
     assetManifestPath: resolve(
       workingDirectory,
       environment.KYC_ASSET_MANIFEST_PATH ?? "assets/manifest.json",

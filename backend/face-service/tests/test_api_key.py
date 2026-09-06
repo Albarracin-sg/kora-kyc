@@ -43,6 +43,31 @@ def test_health_never_requires_api_key(monkeypatch):
     assert response.json() == {"status": "ok"}
 
 
+def test_readiness_is_false_until_the_analyzer_is_preloaded(monkeypatch):
+    monkeypatch.setattr("app.main.is_analyzer_ready", lambda: False)
+
+    not_ready = TestClient(app).get("/ready")
+
+    assert not_ready.status_code == 503
+    assert not_ready.json() == {"status": "not_ready"}
+
+    monkeypatch.setattr("app.main.is_analyzer_ready", lambda: True)
+    ready = TestClient(app).get("/ready")
+
+    assert ready.status_code == 200
+    assert ready.json() == {"status": "ready"}
+
+
+def test_startup_preloads_the_analyzer_before_serving(monkeypatch):
+    preload_calls = []
+    monkeypatch.setattr("app.main.preload_analyzer", lambda: preload_calls.append(True))
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+
+    assert preload_calls == [True]
+
+
 @pytest.mark.parametrize("endpoint", PUBLIC_DOCUMENTATION_ENDPOINTS)
 def test_public_documentation_endpoints_are_disabled(endpoint):
     response = TestClient(app).get(endpoint)

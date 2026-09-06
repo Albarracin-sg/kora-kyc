@@ -15,6 +15,8 @@ import { OpenCodeGoDocumentExtractionProvider } from "./providers/opencode-go-do
 import { selectDocumentExtractionProvider } from "./providers/document-extraction-provider.factory";
 import { selectFaceVerificationProvider } from "./providers/face-verification-provider.factory";
 import { AppConfigService } from "../config/app-config.service";
+import { B2FileStorage } from "./storage/b2-file.storage";
+import { selectFileStorageProvider } from "./storage/file-storage-provider.factory";
 import { LocalFileStorage } from "./storage/local-file.storage";
 
 @Module({
@@ -25,12 +27,17 @@ import { LocalFileStorage } from "./storage/local-file.storage";
     ImageNormalizationService,
     KycService,
     KycProcessingWorker,
-    LocalFileStorage,
     LocalTesseractDocumentExtractionProvider,
     LocalHumanFaceVerificationProvider,
     {
       provide: KYC_TOKENS.FILE_STORAGE,
-      useExisting: LocalFileStorage,
+      useFactory: (configService: AppConfigService) =>
+        selectFileStorageProvider(
+          configService.values,
+          () => new LocalFileStorage(configService),
+          () => new B2FileStorage(configService),
+        ),
+      inject: [AppConfigService],
     },
     {
       provide: KYC_TOKENS.DOCUMENT_EXTRACTION_PROVIDER,

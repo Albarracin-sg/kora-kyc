@@ -12,20 +12,46 @@ can never approve).  500 is reserved for health/config failures.
 """
 from __future__ import annotations
 
+import logging
+from contextlib import asynccontextmanager
 from secrets import compare_digest
+from collections.abc import AsyncIterator
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.face_service import IMAGE_KIND, assess_image, finalize_compare, get_analyzer
+from app.face_service import (
+    IMAGE_KIND,
+    assess_image,
+    finalize_compare,
+    get_analyzer,
+    is_analyzer_ready,
+    preload_analyzer,
+)
 from app.quality import decode_base64_image, error_verdict
 from app.schemas import CompareResponse, FaceImagesRequest, QualityResponse
+
+LOGGER = logging.getLogger("koa.face-service")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Prepare the model before the service can become ready."""
+    try:
+        preload_analyzer()
+    except Exception as exc:
+        # Keep liveness available so the platform can report the failed
+        # instance, but readiness remains 503 and biometric routes fail closed.
+        LOGGER.error("InsightFace analyzer preload failed: %s", type(exc).__name__)
+    yield
+
 
 app = FastAPI(
     title="Koa Face Service",
     version="0.1.0",
+    lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
@@ -58,6 +84,14 @@ def require_api_key(x_api_key: str = Header(default="")) -> None:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def readiness() -> JSONResponse:
+    """Report readiness only after the configured model is prepared."""
+    if not is_analyzer_ready():
+        return JSONResponse(status_code=503, content={"status": "not_ready"})
+    return JSONResponse(status_code=200, content={"status": "ready"})
 
 
 @app.post("/face/quality", response_model=QualityResponse, dependencies=[Depends(require_api_key)])
