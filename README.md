@@ -16,6 +16,7 @@ Quedan fuera del alcance la prueba de vida, la detección de suplantación, la a
 - Extracción estructurada y validación documental de cédulas mediante un proveedor configurado exclusivamente en el backend.
 - Comparación facial con Human/TFJS local o mediante el `face_service` explícitamente configurado.
 - Estados explícitos del proceso y resultado consultable desde el perfil.
+- Presentación en el perfil de datos documentales tipados, incluyendo `NUIP / ID`, tipo de sangre y lugar de nacimiento cuando sean legibles; la nacionalidad colombiana se deriva sólo del tipo confirmado y no se extrae por OCR.
 - Almacenamiento privado de imágenes y validaciones de archivos antes de procesarlos.
 - Documentación de la API autoservida con Scalar sobre el esquema OpenAPI del backend.
 - Procesamiento de fallo cerrado: una evidencia, modelo o procesamiento inválido no puede producir una aprobación.

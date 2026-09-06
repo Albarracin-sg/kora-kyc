@@ -49,7 +49,7 @@ La infraestructura del backend se conserva en `backend/infra/`. No ejecute Docke
 - Mantenga las imágenes en almacenamiento privado y conserve `KYC_DOCUMENT_HASH_PEPPER` separado de `JWT_SECRET`.
 - Valide tamaño, dimensiones, tipo y contenido de los archivos en el backend antes de procesarlos.
 - La imagen de la cédula se transmite al proveedor externo configurado; exija consentimiento informado y no almacene la respuesta OCR/PII cruda. La auditoría documental sólo conserva proveedor y modelo.
-- El backend puede persistir únicamente los campos mínimos y tipados extraídos del documento para mostrarlos en el perfil del titular (`documentFullName`, `documentNumber`, `documentBirthDate`, `documentIssueDate`, `documentSex`, `documentHeight` y `documentCheckResult`), junto con el hash existente `documentNumberHash`. Persistirlos requiere solicitud o consentimiento explícito del usuario. La respuesta OCR cruda del proveedor nunca se almacena y estos campos no deben replicar reglas de decisión KYC.
+- El backend puede persistir únicamente los campos mínimos y tipados extraídos del documento para mostrarlos en el perfil del titular (`documentFullName`, `documentNumber`, `documentBirthDate`, `documentIssueDate`, `documentSex`, `documentHeight`, `documentBloodType`, `documentBirthPlace` y `documentCheckResult`), junto con el hash existente `documentNumberHash`. Persistirlos requiere solicitud o consentimiento explícito del usuario. La respuesta OCR cruda del proveedor nunca se almacena; `documentNationality` es un dato derivado `COLOMBIAN` sólo para un `documentType` confirmado como `COLOMBIAN_CEDULA`, no es OCR y no interviene en la decisión KYC. Estos campos no deben replicar reglas de decisión KYC.
 
 ## Capa de seguridad HTTP
 

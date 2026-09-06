@@ -85,6 +85,9 @@ export function ProfileScreen({ navigation }: AppScreenProps<typeof APP_ROUTE.PR
             issueDate={verification.documentIssueDate}
             sex={verification.documentSex}
             height={verification.documentHeight}
+            bloodType={verification.documentBloodType}
+            birthPlace={verification.documentBirthPlace}
+            nationality={verification.documentNationality}
             checkResult={verification.documentCheckResult}
           />
         ) : null}

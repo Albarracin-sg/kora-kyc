@@ -11,6 +11,9 @@ interface CedulaDataCardProps {
   issueDate: string | null;
   sex: string | null;
   height: string | null;
+  bloodType: string | null;
+  birthPlace: string | null;
+  nationality: string | null;
   checkResult: DocumentCheckResult | null;
 }
 
@@ -21,6 +24,9 @@ export function CedulaDataCard({
   issueDate,
   sex,
   height,
+  bloodType,
+  birthPlace,
+  nationality,
   checkResult,
 }: CedulaDataCardProps): ReactNode {
   const verdict = getCedulaVerdictPresentation(checkResult);
@@ -40,7 +46,7 @@ export function CedulaDataCard({
       </View>
 
       <View style={styles.fieldRow}>
-        <Text style={styles.fieldLabel}>Número</Text>
+        <Text style={styles.fieldLabel}>NUIP / ID</Text>
         <Text style={styles.fieldValue}>{documentNumber ?? "—"}</Text>
       </View>
 
@@ -62,6 +68,21 @@ export function CedulaDataCard({
       <View style={styles.fieldRow}>
         <Text style={styles.fieldLabel}>Estatura</Text>
         <Text style={styles.fieldValue}>{height ?? "—"}</Text>
+      </View>
+
+      <View style={styles.fieldRow}>
+        <Text style={styles.fieldLabel}>Tipo de sangre</Text>
+        <Text style={styles.fieldValue}>{bloodType ?? "—"}</Text>
+      </View>
+
+      <View style={styles.fieldRow}>
+        <Text style={styles.fieldLabel}>Lugar de nacimiento</Text>
+        <Text style={styles.fieldValue}>{birthPlace ?? "—"}</Text>
+      </View>
+
+      <View style={styles.fieldRow}>
+        <Text style={styles.fieldLabel}>Nacionalidad</Text>
+        <Text style={styles.fieldValue}>{nationality ?? "—"}</Text>
       </View>
     </View>
   );

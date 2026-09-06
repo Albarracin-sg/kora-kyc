@@ -43,6 +43,8 @@ export class LocalTesseractDocumentExtractionProvider
           issueDate: null,
           sex: null,
           height: null,
+          bloodType: null,
+          birthPlace: null,
           reasonCode: "NO_DOCUMENT_PROVIDED",
         },
         frontPresent: false,

@@ -15,6 +15,8 @@ describe("parseColombianCedula", () => {
     expect(result.outcome).toBe(DOCUMENT_PARSE_OUTCOME.VALID);
     expect(result.documentType).toBe("COLOMBIAN_CEDULA");
     expect(result.documentNumber).toBe("1234567890");
+    expect(result.bloodType).toBeNull();
+    expect(result.birthPlace).toBeNull();
   });
 
   it("routes ambiguous document numbers to review", () => {
@@ -27,6 +29,8 @@ describe("parseColombianCedula", () => {
 
     expect(result.outcome).toBe(DOCUMENT_PARSE_OUTCOME.REVIEW);
     expect(result.documentNumber).toBeNull();
+    expect(result.bloodType).toBeNull();
+    expect(result.birthPlace).toBeNull();
   });
 
   it("rejects a document without Colombian cédula context", () => {
@@ -34,5 +38,7 @@ describe("parseColombianCedula", () => {
 
     expect(result.outcome).toBe(DOCUMENT_PARSE_OUTCOME.REJECT);
     expect(result.documentNumber).toBeNull();
+    expect(result.bloodType).toBeNull();
+    expect(result.birthPlace).toBeNull();
   });
 });

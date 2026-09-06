@@ -54,6 +54,8 @@ export function parseColombianCedula(ocrText: string): ParsedColombianCedula {
       issueDate: null,
       sex: null,
       height: null,
+      bloodType: null,
+      birthPlace: null,
       reasonCode: "DOCUMENT_TYPE_NOT_RECOGNIZED",
     };
   }
@@ -69,6 +71,8 @@ export function parseColombianCedula(ocrText: string): ParsedColombianCedula {
       issueDate: null,
       sex: null,
       height: null,
+      bloodType: null,
+      birthPlace: null,
       reasonCode: "DOCUMENT_PARSED",
     };
   }
@@ -83,6 +87,8 @@ export function parseColombianCedula(ocrText: string): ParsedColombianCedula {
       issueDate: null,
       sex: null,
       height: null,
+      bloodType: null,
+      birthPlace: null,
       reasonCode: "AMBIGUOUS_DOCUMENT_NUMBER",
     };
   }
@@ -98,6 +104,8 @@ export function parseColombianCedula(ocrText: string): ParsedColombianCedula {
       issueDate: null,
       sex: null,
       height: null,
+      bloodType: null,
+      birthPlace: null,
       reasonCode: "DOCUMENT_PARSED_UNLABELED",
     };
   }
@@ -111,6 +119,8 @@ export function parseColombianCedula(ocrText: string): ParsedColombianCedula {
     issueDate: null,
     sex: null,
     height: null,
+    bloodType: null,
+    birthPlace: null,
     reasonCode: "DOCUMENT_NUMBER_UNAVAILABLE",
   };
 }

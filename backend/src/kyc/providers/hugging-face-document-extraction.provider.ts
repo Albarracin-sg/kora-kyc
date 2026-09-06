@@ -118,7 +118,7 @@ interface HuggingFaceChatCompletionMessage {
 }
 
 export class HuggingFaceDocumentExtractionError extends Error {
-  constructor(readonly code: HuggingFaceDocumentExtractionErrorCode) {
+  constructor(readonly code: HuggingFaceDocumentExtractionErrorCode, readonly httpStatus?: number) {
     super(`Hugging Face document extraction failed: ${code}`);
     this.name = "HuggingFaceDocumentExtractionError";
   }
@@ -181,11 +181,13 @@ export class HuggingFaceDocumentExtractionProvider implements DocumentExtraction
       if (response.status === HUGGING_FACE_HTTP_STATUS.TOO_MANY_REQUESTS) {
         throw new ExternalDocumentProviderError(
           EXTERNAL_DOCUMENT_PROVIDER_FAILURE.RATE_LIMITED,
+          response.status,
         );
       }
       if (!response.ok) {
         throw new HuggingFaceDocumentExtractionError(
           HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.REQUEST_FAILED,
+          response.status,
         );
       }
 

@@ -52,6 +52,19 @@ interface FaceServiceCompareResponse {
   reasons: Record<string, string>;
 }
 
+const FACE_SERVICE_COMPARE_ACTION = {
+  MATCHED: "MATCHED",
+  NO_MATCH: "NO_MATCH",
+  NEEDS_REVIEW: "NEEDS_REVIEW",
+} as const;
+
+const FACE_SERVICE_METRIC_RANGE = {
+  MIN_SIMILARITY: -1,
+  MAX_SIMILARITY: 1,
+  MIN_DISTANCE: 0,
+  MAX_DISTANCE: 2,
+} as const;
+
 export interface FaceServiceProviderConfiguration {
   values: Pick<AppConfiguration, "faceServiceUrl" | "faceServiceTimeoutMs" | "faceApiKey">;
 }
@@ -68,6 +81,19 @@ function parseOptionalFiniteNumber(value: unknown): number | null | undefined {
     return undefined;
   }
   return value;
+}
+
+export function calculateFaceServiceDistance(similarity: number): number | null {
+  const distance = 1 - similarity;
+  if (
+    !Number.isFinite(distance) ||
+    distance < FACE_SERVICE_METRIC_RANGE.MIN_DISTANCE ||
+    distance > FACE_SERVICE_METRIC_RANGE.MAX_DISTANCE
+  ) {
+    return null;
+  }
+
+  return distance;
 }
 
 function parseQualityItem(value: unknown): FaceServiceQualityItem | null {
@@ -119,6 +145,14 @@ function parseCompareResponse(value: unknown): FaceServiceCompareResponse | null
   }
   const parsedSimilarity = parseOptionalFiniteNumber(similarity);
   if (parsedSimilarity === undefined) {
+    return null;
+  }
+  if (
+    parsedSimilarity !== null &&
+    (parsedSimilarity < FACE_SERVICE_METRIC_RANGE.MIN_SIMILARITY ||
+      parsedSimilarity > FACE_SERVICE_METRIC_RANGE.MAX_SIMILARITY ||
+      calculateFaceServiceDistance(parsedSimilarity) === null)
+  ) {
     return null;
   }
   if (confidence !== null && typeof confidence !== "string") {
@@ -181,16 +215,30 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
     if (compare.quality_document !== "HIGH" || compare.quality_selfie !== "HIGH") {
       throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.QUALITY_LOW);
     }
-    if (compare.action === "NEEDS_REVIEW") {
+    if (
+      (compare.action === FACE_SERVICE_COMPARE_ACTION.MATCHED && !compare.match) ||
+      (compare.action === FACE_SERVICE_COMPARE_ACTION.NO_MATCH && compare.match) ||
+      (compare.action === FACE_SERVICE_COMPARE_ACTION.NEEDS_REVIEW && compare.match)
+    ) {
+      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
+    }
+    if (compare.action === FACE_SERVICE_COMPARE_ACTION.NEEDS_REVIEW) {
       // The service could not produce embeddings for a comparison. This is
       // equivalent to the local provider being unable to embed the faces.
       throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.EMBEDDING_UNAVAILABLE);
     }
-    if (compare.action !== "MATCHED" && compare.action !== "NO_MATCH") {
+    if (
+      compare.action !== FACE_SERVICE_COMPARE_ACTION.MATCHED &&
+      compare.action !== FACE_SERVICE_COMPARE_ACTION.NO_MATCH
+    ) {
       throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
     }
     if (compare.similarity === null) {
       // Fail closed: a match must never be approved without a numeric metric.
+      throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
+    }
+    const distance = calculateFaceServiceDistance(compare.similarity);
+    if (distance === null) {
       throw new FaceCaptureError(FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE);
     }
 
@@ -202,7 +250,7 @@ export class FaceServiceVerificationProvider implements FaceVerificationProvider
       // The face service expresses similarity as a cosine in [-1, 1]. Its
       // equivalent distance keeps the "higher is farther apart" semantics of
       // the local euclidean metric (range [0, 2]).
-      distance: 1 - compare.similarity,
+      distance,
     };
   }
 

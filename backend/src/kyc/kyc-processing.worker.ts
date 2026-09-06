@@ -19,10 +19,12 @@ import {
   GEMINI_DOCUMENT_EXTRACTION_FAILURE,
   GeminiDocumentExtractionError,
 } from "./providers/gemini-document-extraction.provider";
+import { HuggingFaceDocumentExtractionError } from "./providers/hugging-face-document-extraction.provider";
 import {
   ExternalDocumentProviderError,
   EXTERNAL_DOCUMENT_PROVIDER_FAILURE,
 } from "./providers/external-document-provider.error";
+import { isDocumentExtractionReasonCode } from "./providers/document-extraction-response";
 import {
   FaceCaptureError,
   FaceModelUnavailableError,
@@ -58,6 +60,11 @@ interface ClaimedKycProcessingJob extends KycProcessingJob {
   lockToken: string;
 }
 
+interface ProviderFailureLogDetails {
+  providerCode?: string;
+  providerHttpStatus?: number;
+}
+
 interface KycTerminalOutcome {
   status: KycStatus;
   reasonCode: string;
@@ -69,6 +76,8 @@ interface KycTerminalOutcome {
   documentIssueDate: Date | null;
   documentSex: string | null;
   documentHeight: string | null;
+  documentBloodType: string | null;
+  documentBirthPlace: string | null;
   documentCheckResult: DocumentParseOutcome | null;
   documentOcrConfidence: number | null;
   documentProvider: string | null;
@@ -84,15 +93,39 @@ class KycJobClaimLostError extends Error {
   }
 }
 
+const COLOMBIAN_CEDULA_DOCUMENT_TYPE = "COLOMBIAN_CEDULA";
+const DOCUMENT_NUMBER_PATTERN = /^\d{6,10}$/;
+
 function documentDateToDateOrNull(date: string | null): Date | null {
-  if (!date) {
+  if (!isValidIsoDate(date)) {
     return null;
   }
-  const parsed = new Date(date);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
+
+  return new Date(`${date}T00:00:00.000Z`);
+}
+
+function isValidIsoDate(value: string | null): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
   }
-  return parsed;
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function hasCompleteDocumentProfile(extraction: DocumentExtractionResult): boolean {
+  const parsedDocument = extraction.parsedDocument;
+  const fullName = parsedDocument.fullName?.trim() ?? "";
+
+  return (
+    parsedDocument.outcome === DOCUMENT_PARSE_OUTCOME.VALID &&
+    parsedDocument.documentType === COLOMBIAN_CEDULA_DOCUMENT_TYPE &&
+    parsedDocument.documentNumber !== null &&
+    DOCUMENT_NUMBER_PATTERN.test(parsedDocument.documentNumber) &&
+    fullName.length >= 3 &&
+    /\p{L}/u.test(fullName) &&
+    isValidIsoDate(parsedDocument.birthDate)
+  );
 }
 
 @Injectable()
@@ -234,6 +267,17 @@ export class KycProcessingWorker {
         verification,
         "document-provider",
         this.documentProviderFailureCode(error),
+        this.documentProviderFailureLogDetails(error),
+      );
+      return;
+    }
+
+    if (!isDocumentExtractionReasonCode(extractedDocument.parsedDocument.reasonCode)) {
+      await this.completeStageFailure(
+        job,
+        verification,
+        "document-provider",
+        KYC_PROCESSING_FAILURE.DOCUMENT_PROVIDER_FAILED,
       );
       return;
     }
@@ -247,6 +291,22 @@ export class KycProcessingWorker {
     const documentOutcome = this.evaluateDocument(extractedDocument);
     if (documentOutcome) {
       await this.complete(job, verification, documentOutcome);
+      return;
+    }
+
+    if (!hasCompleteDocumentProfile(extractedDocument)) {
+      await this.complete(job, verification, {
+        status: KYC_STATUS.NEEDS_REVIEW,
+        reasonCode: "INCOMPLETE_DOCUMENT_PROFILE",
+        documentType: extractedDocument.parsedDocument.documentType,
+        documentNumberHash: null,
+        ...this.documentProfileFields(extractedDocument),
+        documentOcrConfidence: extractedDocument.confidence,
+        documentProvider: extractedDocument.audit.provider,
+        documentProviderModel: extractedDocument.audit.model,
+        faceDistance: null,
+        faceSimilarity: null,
+      });
       return;
     }
 
@@ -312,6 +372,7 @@ export class KycProcessingWorker {
     verification: VerificationWithImages,
     stage: string,
     code: KycProcessingFailureCode,
+    providerFailureLogDetails: ProviderFailureLogDetails = {},
   ): Promise<void> {
     this.logger.warn(
       JSON.stringify({
@@ -320,6 +381,7 @@ export class KycProcessingWorker {
         code,
         jobId: job.id,
         verificationId: verification.id,
+        ...providerFailureLogDetails,
       }),
     );
     await this.complete(job, verification, this.processingFailedOutcome(code));
@@ -341,6 +403,32 @@ export class KycProcessingWorker {
     }
 
     return KYC_PROCESSING_FAILURE.DOCUMENT_PROVIDER_FAILED;
+  }
+
+  private documentProviderFailureLogDetails(error: unknown): ProviderFailureLogDetails {
+    if (error instanceof HuggingFaceDocumentExtractionError) {
+      return {
+        providerCode: error.code,
+        ...(typeof error.httpStatus === "number"
+          ? { providerHttpStatus: error.httpStatus }
+          : {}),
+      };
+    }
+
+    if (error instanceof ExternalDocumentProviderError) {
+      return {
+        providerCode: error.code,
+        ...(typeof error.httpStatus === "number"
+          ? { providerHttpStatus: error.httpStatus }
+          : {}),
+      };
+    }
+
+    if (error instanceof GeminiDocumentExtractionError) {
+      return { providerCode: error.code };
+    }
+
+    return {};
   }
 
   private async collectLabeledDocumentImages(
@@ -554,6 +642,8 @@ export class KycProcessingWorker {
       documentIssueDate: null,
       documentSex: null,
       documentHeight: null,
+      documentBloodType: null,
+      documentBirthPlace: null,
       documentCheckResult: null,
       documentOcrConfidence: null,
       documentProvider: this.documentExtractionProvider.audit.provider,
@@ -573,6 +663,8 @@ export class KycProcessingWorker {
     | "documentIssueDate"
     | "documentSex"
     | "documentHeight"
+    | "documentBloodType"
+    | "documentBirthPlace"
     | "documentCheckResult"
   > {
     const parsedDocument = extraction.parsedDocument;
@@ -584,6 +676,8 @@ export class KycProcessingWorker {
         documentIssueDate: null,
         documentSex: null,
         documentHeight: null,
+        documentBloodType: null,
+        documentBirthPlace: null,
         documentCheckResult: parsedDocument.outcome,
       };
     }
@@ -595,6 +689,8 @@ export class KycProcessingWorker {
       documentIssueDate: documentDateToDateOrNull(parsedDocument.issueDate),
       documentSex: parsedDocument.sex,
       documentHeight: parsedDocument.height,
+      documentBloodType: parsedDocument.bloodType,
+      documentBirthPlace: parsedDocument.birthPlace,
       documentCheckResult: parsedDocument.outcome,
     };
   }
@@ -643,6 +739,8 @@ export class KycProcessingWorker {
             documentIssueDate: outcome.documentIssueDate,
             documentSex: outcome.documentSex,
             documentHeight: outcome.documentHeight,
+            documentBloodType: outcome.documentBloodType,
+            documentBirthPlace: outcome.documentBirthPlace,
             documentCheckResult: outcome.documentCheckResult,
             documentOcrConfidence: outcome.documentOcrConfidence,
             documentProvider: outcome.documentProvider,
@@ -662,6 +760,17 @@ export class KycProcessingWorker {
 
       throw error;
     }
+
+    this.logger.log(
+      JSON.stringify({
+        event: "kyc_processing_completed",
+        jobId: job.id,
+        verificationId: verification.id,
+        status: outcome.status,
+        reasonCode: outcome.reasonCode,
+        hasFaceResult: outcome.faceSimilarity !== null,
+      }),
+    );
   }
 
   private async markJobFailedWithoutVerification(

@@ -18,6 +18,8 @@ export interface ParsedColombianCedula {
   issueDate: string | null;
   sex: string | null;
   height: string | null;
+  bloodType: string | null;
+  birthPlace: string | null;
   reasonCode: string;
 }
 

@@ -73,6 +73,8 @@ model KycVerification {
   documentIssueDate     DateTime?
   documentSex           String?
   documentHeight        String?
+  documentBloodType     String?
+  documentBirthPlace    String?
   documentCheckResult   String?
   documentOcrConfidence Float?
   documentProvider      String?

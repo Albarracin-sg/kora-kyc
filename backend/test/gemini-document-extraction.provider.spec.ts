@@ -19,6 +19,10 @@ import {
   type GeminiContentClient,
 } from "../src/kyc/providers/gemini-document-extraction.provider";
 import {
+  DOCUMENT_EXTRACTION_INSTRUCTION,
+  DOCUMENT_EXTRACTION_RESPONSE_SCHEMA,
+} from "../src/kyc/providers/document-extraction-response";
+import {
   DOCUMENT_PARSE_OUTCOME,
   type DocumentExtractionProvider,
   type DocumentExtractionResult,
@@ -41,6 +45,8 @@ const VALID_GEMINI_RESPONSE = JSON.stringify({
   issueDate: "2010-05-15",
   sex: "F",
   height: "1,64 m",
+  bloodType: "O+",
+  birthPlace: "Bogotá",
   result: "VALID",
   reason: "DOCUMENT_PARSED",
   confidence: 0.94,
@@ -113,6 +119,8 @@ function createStubProvider(): DocumentExtractionProvider {
         issueDate: null,
         sex: null,
         height: null,
+        bloodType: null,
+        birthPlace: null,
         reasonCode: "TEST_ONLY",
       },
       frontPresent: false,
@@ -203,11 +211,37 @@ describe("Gemini document extraction", () => {
       issueDate: "2010-05-15",
       sex: "F",
       height: "1,64 m",
+      bloodType: "O+",
+      birthPlace: "Bogotá",
       reasonCode: "DOCUMENT_PARSED",
     });
     expect(result.frontPresent).toBe(true);
     expect(result.backPresent).toBe(true);
     expect(result.audit).toEqual({ provider: "gemini", model: "gemini-2.5-flash" });
+  });
+
+  it("sends the shared classification instruction and strict nullable schema", async () => {
+    let capturedParameters: GenerateContentParameters | undefined;
+    const generateContent = jest.fn(
+      async (parameters: GenerateContentParameters): Promise<GenerateContentResponse> => {
+        capturedParameters = parameters;
+        return createResponse(VALID_GEMINI_RESPONSE);
+      },
+    );
+    const client: GeminiContentClient = { models: { generateContent } };
+
+    await new GeminiDocumentExtractionProvider(
+      { values: createAppConfiguration(BASE_ENVIRONMENT, process.cwd()) },
+      client,
+    ).extract([createLabeledImage("FRONT")]);
+
+    expect(generateContent).toHaveBeenCalledTimes(1);
+    expect(capturedParameters?.config?.responseJsonSchema).toEqual(
+      DOCUMENT_EXTRACTION_RESPONSE_SCHEMA,
+    );
+    expect(JSON.stringify(capturedParameters)).toContain(
+      DOCUMENT_EXTRACTION_INSTRUCTION.slice(0, 120),
+    );
   });
 
   it("fails closed when Gemini returns invalid JSON", async () => {
@@ -228,6 +262,8 @@ describe("Gemini document extraction", () => {
       issueDate: null,
       sex: null,
       height: null,
+      bloodType: null,
+      birthPlace: null,
       result: "REJECT",
       reason: "DOCUMENT_TYPE_NOT_RECOGNIZED",
       confidence: 0.9,
@@ -242,6 +278,8 @@ describe("Gemini document extraction", () => {
       issueDate: null,
       sex: null,
       height: null,
+      bloodType: null,
+      birthPlace: null,
       result: "VALID",
       reason: "DOCUMENT_PARSED",
       confidence: 0.9,
@@ -292,6 +330,8 @@ describe("Gemini document extraction", () => {
       issueDate: null,
       sex: null,
       height: null,
+      bloodType: null,
+      birthPlace: null,
       result: "VALID",
       reason: "DOCUMENT_PARSED",
       confidence: 0.94,
@@ -313,6 +353,8 @@ describe("Gemini document extraction", () => {
       issueDate: null,
       sex: null,
       height: null,
+      bloodType: null,
+      birthPlace: null,
       reasonCode: "DOCUMENT_PARSED",
     });
   });
@@ -326,6 +368,8 @@ describe("Gemini document extraction", () => {
       issueDate: "15/05/2010",
       sex: "X",
       height: " ".repeat(64),
+      bloodType: "ABO",
+      birthPlace: "123456",
       result: "VALID",
       reason: "DOCUMENT_PARSED",
       confidence: 0.94,
@@ -347,6 +391,8 @@ describe("Gemini document extraction", () => {
       issueDate: null,
       sex: null,
       height: null,
+      bloodType: null,
+      birthPlace: null,
       reasonCode: "DOCUMENT_PARSED",
     });
   });

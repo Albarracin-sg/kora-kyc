@@ -2,6 +2,7 @@ jest.mock("@nestjs/common", () => ({
   Inject: () => (): void => undefined,
   Injectable: () => (): void => undefined,
   Logger: class {
+    log(): void {}
     warn(): void {}
   },
 }));
@@ -24,6 +25,10 @@ import {
   ExternalDocumentProviderError,
   EXTERNAL_DOCUMENT_PROVIDER_FAILURE,
 } from "../src/kyc/providers/external-document-provider.error";
+import {
+  HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE,
+  HuggingFaceDocumentExtractionError,
+} from "../src/kyc/providers/hugging-face-document-extraction.provider";
 import type { DocumentExtractionProvider } from "../src/kyc/providers/document-extraction.provider";
 import { DOCUMENT_PARSE_OUTCOME } from "../src/kyc/providers/document-extraction.provider";
 import {
@@ -54,6 +59,8 @@ function createVerification(): KycVerification {
     documentIssueDate: null,
     documentSex: null,
     documentHeight: null,
+    documentBloodType: null,
+    documentBirthPlace: null,
     documentCheckResult: null,
     documentOcrConfidence: null,
     documentProvider: null,
@@ -190,7 +197,7 @@ describe("KycProcessingWorker stage failures", () => {
         ),
     );
     const loggerWarn = jest.fn();
-    Object.defineProperty(worker, "logger", { value: { warn: loggerWarn } });
+    Object.defineProperty(worker, "logger", { value: { log: jest.fn(), warn: loggerWarn } });
 
     await worker["processJob"](createJob());
 
@@ -217,8 +224,41 @@ describe("KycProcessingWorker stage failures", () => {
         code: KYC_PROCESSING_FAILURE.DOCUMENT_PROVIDER_QUOTA_EXHAUSTED,
         jobId: "job-opaque-id",
         verificationId: "verification-opaque-id",
+        providerCode: GEMINI_DOCUMENT_EXTRACTION_FAILURE.REQUEST_QUOTA_EXHAUSTED,
       }),
     );
+  });
+
+  it("logs only typed provider diagnostics for an HTTP document-provider failure", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const { worker } = createWorker(
+      fileStorage,
+      jest.fn().mockRejectedValue(
+        new HuggingFaceDocumentExtractionError(
+          HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.REQUEST_FAILED,
+          401,
+        ),
+      ),
+    );
+    const loggerWarn = jest.fn();
+    Object.defineProperty(worker, "logger", { value: { log: jest.fn(), warn: loggerWarn } });
+
+    await worker["processJob"](createJob());
+
+    const logLine = loggerWarn.mock.calls[0]?.[0] as string;
+    expect(logLine).toBe(
+      JSON.stringify({
+        event: "kyc_processing_stage_failed",
+        stage: "document-provider",
+        code: KYC_PROCESSING_FAILURE.DOCUMENT_PROVIDER_FAILED,
+        jobId: "job-opaque-id",
+        verificationId: "verification-opaque-id",
+        providerCode: HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.REQUEST_FAILED,
+        providerHttpStatus: 401,
+      }),
+    );
+    expect(logLine).not.toContain("sensitive provider body");
+    expect(logLine).not.toContain("test-huggingface-token");
   });
 
   it("persists a generic external document-provider rate-limit code", async () => {
@@ -271,12 +311,89 @@ describe("KycProcessingWorker document profile persistence", () => {
       issueDate: "2015-03-10",
       sex: "F",
       height: "1,64 m",
+      bloodType: "O+",
+      birthPlace: "Bogotá",
       reasonCode: "DOCUMENT_PARSED",
     },
     frontPresent: true,
     backPresent: true,
     audit: { provider: "test", model: "test" },
   };
+
+  const LOCAL_INCOMPLETE_EXTRACTION = {
+    ...VALID_EXTRACTION,
+    parsedDocument: {
+      ...VALID_EXTRACTION.parsedDocument,
+      fullName: null,
+      birthDate: null,
+    },
+    audit: { provider: "local", model: "tesseract-spa" },
+  };
+
+  it("routes a local incomplete document profile to review before face verification", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const faceVerify = jest.fn();
+    const { worker, transaction } = createWorker(
+      fileStorage,
+      jest.fn().mockResolvedValue(LOCAL_INCOMPLETE_EXTRACTION),
+      { images: FULL_COVERAGE_IMAGES, faceVerify },
+    );
+
+    await worker["processJob"](createJob());
+
+    expect(faceVerify).not.toHaveBeenCalled();
+    expect(transaction.kycVerification.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: KYC_STATUS.NEEDS_REVIEW,
+          rejectionCode: "INCOMPLETE_DOCUMENT_PROFILE",
+          documentType: "COLOMBIAN_CEDULA",
+          documentNumber: "12345678",
+          documentFullName: null,
+          documentBirthDate: null,
+          documentBloodType: "O+",
+          documentBirthPlace: "Bogotá",
+          faceDistance: null,
+          faceSimilarity: null,
+        }),
+      }),
+    );
+  });
+
+  it("fails closed and keeps dynamic document reasons out of persistence and logs", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const { worker, transaction } = createWorker(
+      fileStorage,
+      jest.fn().mockResolvedValue({
+        ...VALID_EXTRACTION,
+        parsedDocument: {
+          ...VALID_EXTRACTION.parsedDocument,
+          reasonCode: "DOCUMENT_NUMBER_12345678",
+        },
+      }),
+      { images: FULL_COVERAGE_IMAGES },
+    );
+    const loggerWarn = jest.fn();
+    const loggerLog = jest.fn();
+    Object.defineProperty(worker, "logger", { value: { warn: loggerWarn, log: loggerLog } });
+
+    await worker["processJob"](createJob());
+
+    expect(transaction.kycVerification.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: KYC_STATUS.PROCESSING_FAILED,
+          rejectionCode: KYC_PROCESSING_FAILURE.DOCUMENT_PROVIDER_FAILED,
+        }),
+      }),
+    );
+
+    const logs = JSON.stringify([...loggerWarn.mock.calls, ...loggerLog.mock.calls]);
+    expect(logs).toContain(KYC_PROCESSING_FAILURE.DOCUMENT_PROVIDER_FAILED);
+    for (const pii of ["12345678", "PEPITA PEREZ", "1990-05-15", "O+", "Bogotá"]) {
+      expect(logs).not.toContain(pii);
+    }
+  });
 
   it("persists the typed profile fields and the document verdict on approval", async () => {
     const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
@@ -307,6 +424,8 @@ describe("KycProcessingWorker document profile persistence", () => {
           documentIssueDate: new Date("2015-03-10T00:00:00.000Z"),
           documentSex: "F",
           documentHeight: "1,64 m",
+          documentBloodType: "O+",
+          documentBirthPlace: "Bogotá",
         }),
       }),
     );
@@ -337,6 +456,8 @@ describe("KycProcessingWorker document profile persistence", () => {
           documentIssueDate: new Date("2015-03-10T00:00:00.000Z"),
           documentSex: "F",
           documentHeight: "1,64 m",
+          documentBloodType: "O+",
+          documentBirthPlace: "Bogotá",
           documentType: null,
           documentNumberHash: null,
         }),
@@ -369,6 +490,8 @@ describe("KycProcessingWorker document profile persistence", () => {
           documentIssueDate: new Date("2015-03-10T00:00:00.000Z"),
           documentSex: "F",
           documentHeight: "1,64 m",
+          documentBloodType: "O+",
+          documentBirthPlace: "Bogotá",
           documentType: null,
           documentNumberHash: null,
         }),
@@ -418,6 +541,8 @@ describe("KycProcessingWorker document profile persistence", () => {
         issueDate: null,
         sex: null,
         height: null,
+        bloodType: null,
+        birthPlace: null,
         reasonCode: "DOCUMENT_UNSUPPORTED",
       },
       frontPresent: true,
@@ -442,11 +567,127 @@ describe("KycProcessingWorker document profile persistence", () => {
           documentIssueDate: null,
           documentSex: null,
           documentHeight: null,
+          documentBloodType: null,
+          documentBirthPlace: null,
           documentType: null,
           documentNumberHash: null,
         }),
       }),
     );
+  });
+
+  it("logs the reason code when a document outcome completes processing", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const { worker } = createWorker(fileStorage, jest.fn().mockResolvedValue({
+      ...VALID_EXTRACTION,
+      parsedDocument: {
+        ...VALID_EXTRACTION.parsedDocument,
+        outcome: DOCUMENT_PARSE_OUTCOME.REJECT,
+        reasonCode: "DOCUMENT_UNSUPPORTED",
+        documentType: null,
+        documentNumber: null,
+        fullName: null,
+        birthDate: null,
+        issueDate: null,
+        sex: null,
+        height: null,
+      },
+    }), {
+      images: FULL_COVERAGE_IMAGES,
+    });
+    const loggerLog = jest.fn();
+    Object.defineProperty(worker, "logger", { value: { log: loggerLog } });
+
+    await worker["processJob"](createJob());
+
+    expect(loggerLog).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: "kyc_processing_completed",
+        jobId: "job-opaque-id",
+        verificationId: "verification-opaque-id",
+        status: KYC_STATUS.REJECTED,
+        reasonCode: "DOCUMENT_UNSUPPORTED",
+        hasFaceResult: false,
+      }),
+    );
+  });
+
+  it("logs a face result when processing reaches face verification", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const faceVerify = jest.fn().mockResolvedValue({
+      documentFaceCount: 1,
+      selfieFaceCount: 1,
+      distance: 0.1,
+      similarity: 0.9,
+      accepted: true,
+    });
+    const { worker } = createWorker(
+      fileStorage,
+      jest.fn().mockResolvedValue(VALID_EXTRACTION),
+      { images: FULL_COVERAGE_IMAGES, faceVerify },
+    );
+    const loggerLog = jest.fn();
+    Object.defineProperty(worker, "logger", { value: { log: loggerLog } });
+
+    await worker["processJob"](createJob());
+
+    expect(faceVerify).toHaveBeenCalledTimes(1);
+    expect(loggerLog).toHaveBeenCalledWith(
+      JSON.stringify({
+        event: "kyc_processing_completed",
+        jobId: "job-opaque-id",
+        verificationId: "verification-opaque-id",
+        status: KYC_STATUS.APPROVED,
+        reasonCode: "KYC_APPROVED",
+        hasFaceResult: true,
+      }),
+    );
+  });
+
+  it("does not log completion when outcome persistence fails", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const { worker, transaction } = createWorker(
+      fileStorage,
+      jest.fn().mockResolvedValue({
+        ...VALID_EXTRACTION,
+        parsedDocument: {
+          ...VALID_EXTRACTION.parsedDocument,
+          outcome: DOCUMENT_PARSE_OUTCOME.REJECT,
+          reasonCode: "DOCUMENT_UNSUPPORTED",
+        },
+      }),
+      { images: FULL_COVERAGE_IMAGES },
+    );
+    transaction.kycVerification.updateMany.mockRejectedValueOnce(new Error("outcome persistence failure"));
+    const loggerLog = jest.fn();
+    Object.defineProperty(worker, "logger", { value: { log: loggerLog } });
+
+    await expect(worker["processJob"](createJob())).rejects.toThrow("outcome persistence failure");
+
+    expect(loggerLog).not.toHaveBeenCalled();
+  });
+
+  it("does not log completion when the job claim is lost", async () => {
+    const fileStorage = { read: jest.fn().mockResolvedValue(Buffer.from("image")) } as unknown as FileStorage;
+    const { worker, transaction } = createWorker(
+      fileStorage,
+      jest.fn().mockResolvedValue({
+        ...VALID_EXTRACTION,
+        parsedDocument: {
+          ...VALID_EXTRACTION.parsedDocument,
+          outcome: DOCUMENT_PARSE_OUTCOME.REJECT,
+          reasonCode: "DOCUMENT_UNSUPPORTED",
+        },
+      }),
+      { images: FULL_COVERAGE_IMAGES },
+    );
+    transaction.kycProcessingJob.updateMany.mockResolvedValueOnce({ count: 0 });
+    const loggerLog = jest.fn();
+    Object.defineProperty(worker, "logger", { value: { log: loggerLog } });
+
+    await worker["processJob"](createJob());
+
+    expect(loggerLog).not.toHaveBeenCalled();
   });
 
   it("persists null profile fields when processing fails before extraction", async () => {
@@ -470,6 +711,8 @@ describe("KycProcessingWorker document profile persistence", () => {
           documentIssueDate: null,
           documentSex: null,
           documentHeight: null,
+          documentBloodType: null,
+          documentBirthPlace: null,
         }),
       }),
     );
@@ -495,6 +738,8 @@ describe("KycProcessingWorker document profile persistence", () => {
         issueDate: null,
         sex: null,
         height: null,
+        bloodType: null,
+        birthPlace: null,
         reasonCode: "DOCUMENT_PARSED",
       },
       frontPresent: true,
@@ -519,6 +764,8 @@ describe("KycProcessingWorker document profile persistence", () => {
           documentIssueDate: null,
           documentSex: null,
           documentHeight: null,
+          documentBloodType: null,
+          documentBirthPlace: null,
         }),
       }),
     );

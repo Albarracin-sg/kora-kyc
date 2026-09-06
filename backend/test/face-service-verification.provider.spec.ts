@@ -14,6 +14,7 @@ import {
   FACE_SERVICE_COMPARE_PATH,
   FACE_SERVICE_QUALITY_PATH,
   FaceServiceVerificationProvider,
+  calculateFaceServiceDistance,
   type FaceServiceFetch,
   type FaceServiceFetchResponse,
 } from "../src/kyc/providers/face-service-verification.provider";
@@ -396,6 +397,93 @@ describe("Face service verification provider", () => {
       FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
     );
   });
+
+  it.each([2, -2])("rejects similarity outside the cosine range: %s", async (similarity) => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(200, JSON.stringify({
+        match: true,
+        similarity,
+        confidence: "low",
+        quality_document: "HIGH",
+        quality_selfie: "HIGH",
+        action: "MATCHED",
+        reasons: { document: "ok", selfie: "ok" },
+      })),
+    );
+
+    await expectFaceCaptureError(
+      createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
+      FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
+    );
+  });
+
+  it("rejects a MATCHED response when match is false", async () => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(200, JSON.stringify({
+        match: false,
+        similarity: 0.8,
+        confidence: "high",
+        quality_document: "HIGH",
+        quality_selfie: "HIGH",
+        action: "MATCHED",
+        reasons: { document: "ok", selfie: "ok" },
+      })),
+    );
+
+    await expectFaceCaptureError(
+      createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
+      FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
+    );
+  });
+
+  it("rejects a NO_MATCH response when match is true", async () => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(200, JSON.stringify({
+        match: true,
+        similarity: 0.8,
+        confidence: "high",
+        quality_document: "HIGH",
+        quality_selfie: "HIGH",
+        action: "NO_MATCH",
+        reasons: { document: "ok", selfie: "ok" },
+      })),
+    );
+
+    await expectFaceCaptureError(
+      createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
+      FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
+    );
+  });
+
+  it("rejects a NEEDS_REVIEW response when match is true", async () => {
+    const fetchStub = createFetchStub(
+      createFetchResponse(200, QUALITY_OK_RESPONSE),
+      createFetchResponse(200, JSON.stringify({
+        match: true,
+        similarity: 0.8,
+        confidence: "high",
+        quality_document: "HIGH",
+        quality_selfie: "HIGH",
+        action: "NEEDS_REVIEW",
+        reasons: { document: "ok", selfie: "ok" },
+      })),
+    );
+
+    await expectFaceCaptureError(
+      createProvider(fetchStub.fetch).verify(DOCUMENT_IMAGE, SELFIE_IMAGE),
+      FACE_CAPTURE_FAILURE_CODE.INVALID_RESPONSE,
+    );
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -2, 2])(
+    "rejects an invalid derived distance for similarity %s",
+    (similarity) => {
+      expect(calculateFaceServiceDistance(similarity)).toBeNull();
+    },
+  );
 
   it("returns a no-match without approving the verification", async () => {
     const fetchStub = createFetchStub(

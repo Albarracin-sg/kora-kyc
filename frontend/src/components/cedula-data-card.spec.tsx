@@ -12,6 +12,9 @@ describe("CedulaDataCard", () => {
         issueDate="2010-05-15"
         sex="F"
         height="1,64 m"
+        bloodType="O+"
+        birthPlace="Bogotá"
+        nationality="COLOMBIAN"
         checkResult={DOCUMENT_CHECK_RESULT.VALID}
       />,
     );
@@ -24,6 +27,10 @@ describe("CedulaDataCard", () => {
     expect(screen.getByText("15/5/2010")).toBeOnTheScreen();
     expect(screen.getByText("F")).toBeOnTheScreen();
     expect(screen.getByText("1,64 m")).toBeOnTheScreen();
+    expect(screen.getByText("O+")).toBeOnTheScreen();
+    expect(screen.getByText("Bogotá")).toBeOnTheScreen();
+    expect(screen.getByText("COLOMBIAN")).toBeOnTheScreen();
+    expect(screen.getByText("NUIP / ID")).toBeOnTheScreen();
   });
 
   it("renders the birth date from the API ISO datetime wire format", () => {
@@ -35,6 +42,9 @@ describe("CedulaDataCard", () => {
         issueDate="2010-05-15T00:00:00.000Z"
         sex="M"
         height="1,75 m"
+        bloodType="A-"
+        birthPlace="Cali"
+        nationality="COLOMBIAN"
         checkResult={DOCUMENT_CHECK_RESULT.VALID}
       />,
     );
@@ -52,6 +62,9 @@ describe("CedulaDataCard", () => {
         issueDate="2010-05-15"
         sex="M"
         height="175 cm"
+        bloodType="AB+"
+        birthPlace="Cartagena"
+        nationality="COLOMBIAN"
         checkResult={DOCUMENT_CHECK_RESULT.VALID}
       />,
     );
@@ -69,12 +82,15 @@ describe("CedulaDataCard", () => {
         issueDate={null}
         sex={null}
         height={null}
+        bloodType={null}
+        birthPlace={null}
+        nationality={null}
         checkResult={null}
       />,
     );
 
     expect(screen.getByText("Sin datos de cédula")).toBeOnTheScreen();
-    expect(screen.getAllByText("—")).toHaveLength(6);
+    expect(screen.getAllByText("—")).toHaveLength(9);
   });
 
   it("does not imply validity for a review verdict", () => {
@@ -86,6 +102,9 @@ describe("CedulaDataCard", () => {
         issueDate={null}
         sex={null}
         height={null}
+        bloodType={null}
+        birthPlace={null}
+        nationality={null}
         checkResult={DOCUMENT_CHECK_RESULT.REVIEW}
       />,
     );
@@ -103,6 +122,9 @@ describe("CedulaDataCard", () => {
         issueDate={null}
         sex={null}
         height={null}
+        bloodType={null}
+        birthPlace={null}
+        nationality={null}
         checkResult={DOCUMENT_CHECK_RESULT.REJECT}
       />,
     );

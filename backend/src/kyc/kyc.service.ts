@@ -37,6 +37,8 @@ const ACTIVE_KYC_STATUSES = [
 const MEDIA_ID_PATTERN = /^c[a-z0-9]{24}$/;
 // Mirrors the safe-key rule enforced by LocalFileStorage.
 const SAFE_STORAGE_KEY_PATTERN = /^[a-zA-Z0-9/_-]+\.jpg$/;
+const COLOMBIAN_CEDULA_DOCUMENT_TYPE = "COLOMBIAN_CEDULA";
+const COLOMBIAN_NATIONALITY = "COLOMBIAN";
 
 export interface KycImageMetadata {
   id: string;
@@ -70,7 +72,10 @@ export interface KycPublicVerification {
   documentIssueDate: Date | null;
   documentSex: string | null;
   documentHeight: string | null;
+  documentBloodType: string | null;
+  documentBirthPlace: string | null;
   documentCheckResult: string | null;
+  documentNationality: string | null;
   faceSimilarity: number | null;
   frontPresent: boolean;
   backPresent: boolean;
@@ -499,7 +504,13 @@ export class KycService {
       documentIssueDate: verification.documentIssueDate,
       documentSex: verification.documentSex,
       documentHeight: verification.documentHeight,
+      documentBloodType: verification.documentBloodType,
+      documentBirthPlace: verification.documentBirthPlace,
       documentCheckResult: verification.documentCheckResult,
+      documentNationality:
+        verification.documentType === COLOMBIAN_CEDULA_DOCUMENT_TYPE
+          ? COLOMBIAN_NATIONALITY
+          : null,
       faceSimilarity: verification.faceSimilarity,
       frontPresent: verification.frontPresent,
       backPresent: verification.backPresent,

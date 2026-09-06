@@ -44,6 +44,8 @@ const VALID_DOCUMENT_RESPONSE = JSON.stringify({
   issueDate: "2005-11-20",
   sex: "M",
   height: "1,75 m",
+  bloodType: "A+",
+  birthPlace: "Medellín",
   result: "VALID",
   reason: "DOCUMENT_PARSED",
   confidence: 0.94,
@@ -179,6 +181,9 @@ describe("Hugging Face document extraction", () => {
       ]),
     );
     expect(requestText).not.toContain("selfie");
+    expect(requestText).toContain("bloodtype");
+    expect(requestText).toContain("birthplace");
+    expect(requestText).toContain("no asumas que las imágenes son una cédula colombiana");
     expect(request.response_format).toEqual({
       type: "json_schema",
       json_schema: {
@@ -198,6 +203,8 @@ describe("Hugging Face document extraction", () => {
         issueDate: "2005-11-20",
         sex: "M",
         height: "1,75 m",
+        bloodType: "A+",
+        birthPlace: "Medellín",
         reasonCode: "DOCUMENT_PARSED",
       },
       frontPresent: true,
@@ -233,14 +240,27 @@ describe("Hugging Face document extraction", () => {
     } satisfies Partial<HuggingFaceDocumentExtractionError>);
   });
 
-  it("maps an external HTTP 429 to the generic rate-limit error", async () => {
-    const fetchStub = createFetchStub(createFetchResponse(429, "ignored"));
+  it.each([401, 402])("preserves HTTP %s on a non-rate-limit provider failure", async (status) => {
+    const fetchStub = createFetchStub(createFetchResponse(status, "sensitive provider body"));
+
+    await expect(
+      createProvider(fetchStub.fetch).extract([createLabeledImage("FRONT")]),
+    ).rejects.toMatchObject({
+      name: "HuggingFaceDocumentExtractionError",
+      code: HUGGING_FACE_DOCUMENT_EXTRACTION_FAILURE.REQUEST_FAILED,
+      httpStatus: status,
+    } satisfies Partial<HuggingFaceDocumentExtractionError>);
+  });
+
+  it("maps an external HTTP 429 to the generic rate-limit error and preserves its status", async () => {
+    const fetchStub = createFetchStub(createFetchResponse(429, "sensitive provider body"));
 
     await expect(
       createProvider(fetchStub.fetch).extract([createLabeledImage("FRONT")]),
     ).rejects.toMatchObject({
       name: "ExternalDocumentProviderError",
       code: EXTERNAL_DOCUMENT_PROVIDER_FAILURE.RATE_LIMITED,
+      httpStatus: 429,
     } satisfies Partial<ExternalDocumentProviderError>);
   });
 

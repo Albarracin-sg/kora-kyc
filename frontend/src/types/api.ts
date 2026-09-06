@@ -89,7 +89,10 @@ export interface KycVerification {
   documentIssueDate: string | null;
   documentSex: string | null;
   documentHeight: string | null;
+  documentBloodType: string | null;
+  documentBirthPlace: string | null;
   documentCheckResult: DocumentCheckResult | null;
+  documentNationality: string | null;
   faceSimilarity: number | null;
   createdAt: string;
   updatedAt: string;
