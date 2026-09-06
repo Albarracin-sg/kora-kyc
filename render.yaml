@@ -7,8 +7,9 @@
 #   3. En el dashboard, setear los secrets marcados `sync: false`
 #      (JWT_SECRET, KYC_DOCUMENT_HASH_PEPPER, OPENCODE_GO_API_KEY,
 #      B2_KEY_ID y B2_APPLICATION_KEY) y
-#      redeployar. FACE_API_KEY se genera una sola vez en
-#      el grupo compartido; nunca se expone al frontend.
+#      redeployar. FACE_API_KEY debe coincidir con el
+#      FACE_SERVICE_API_KEY configurado en Railway; nunca se
+#      expone al frontend.
 #
 # Limitaciones conocidas del plan free:
 #   - Postgres free expira a los 30 días.
@@ -20,7 +21,7 @@ envVarGroups:
   - name: kora-face-service-auth
     envVars:
       - key: FACE_API_KEY
-        generateValue: true
+        sync: false
 
 services:
   - type: web
@@ -38,7 +39,7 @@ services:
           name: kora-postgres
           property: connectionString
       - key: FACE_SERVICE_URL
-        value: https://kora-face-service.onrender.com
+        value: https://kora-kyc-production.up.railway.app
       - fromGroup: kora-face-service-auth
       - key: FACE_SERVICE_TIMEOUT_MS
         value: "120000"
