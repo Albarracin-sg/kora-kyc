@@ -22,8 +22,11 @@
       "package": "com.kora.kyc",
       "adaptiveIcon": {
         "foregroundImage": "./assets/image.png",
-      "backgroundColor": "#020A08"
-      }
+        "backgroundColor": "#020A08"
+      },
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
     "plugins": [
       [
@@ -55,6 +58,19 @@
           "backgroundColor": "#020A08"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "expo-navigation-bar": {
+        "enforceContrast": false,
+        "style": "dark"
+      },
+      "expo-status-bar": {
+        "style": "light"
+      },
+      "eas": {
+        "projectId": "262c0d1e-76de-419c-9780-c16e38e99bd3"
+      }
+    },
+    "owner": "aliaskiwi"
   }
 }
