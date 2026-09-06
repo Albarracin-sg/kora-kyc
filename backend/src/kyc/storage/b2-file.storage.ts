@@ -15,6 +15,7 @@ const CACHE_TTL_MS = {
 interface B2AuthorizationState {
   authorizationToken: string;
   apiUrl: string;
+  downloadUrl: string;
   bucketId: string;
   bucketName: string;
   expiresAt: number;
@@ -135,7 +136,7 @@ export class B2FileStorage implements FileStorage {
 
     return this.withAuthorizationRetry(async (authorization) => {
       const response = await this.fetchResponse(
-        this.createDownloadApiUrl(authorization, key),
+        this.createDownloadUrl(authorization, key),
         {
           method: "GET",
           headers: { Authorization: authorization.authorizationToken },
@@ -355,6 +356,7 @@ export class B2FileStorage implements FileStorage {
       return {
         authorizationToken: readRequiredString(authorizationResponse, "authorizationToken"),
         apiUrl: readHttpsUrl(authorizationResponse, "apiUrl"),
+        downloadUrl: readHttpsUrl(authorizationResponse, "downloadUrl"),
         bucketId,
         bucketName,
         expiresAt: Date.now() + CACHE_TTL_MS.AUTHORIZATION,
@@ -437,11 +439,10 @@ export class B2FileStorage implements FileStorage {
     return `${authorization.apiUrl}${B2_API_PATH}/${operation}`;
   }
 
-  private createDownloadApiUrl(authorization: B2AuthorizationState, key: string): string {
-    const url = new URL(this.createApiUrl(authorization, "b2_download_file_by_name"));
-    url.searchParams.set("bucketName", authorization.bucketName);
-    url.searchParams.set("fileName", key);
-    return url.toString();
+  private createDownloadUrl(authorization: B2AuthorizationState, key: string): string {
+    return `${authorization.downloadUrl}/file/${encodeURIComponent(
+      authorization.bucketName,
+    )}/${encodeURIComponent(key)}`;
   }
 
   private assertSafeStorageKey(key: string): void {

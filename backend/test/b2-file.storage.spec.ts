@@ -138,7 +138,7 @@ describe("B2FileStorage", () => {
     expect(uploadRequest.body).toBe(body);
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
-      `https://api.example.test/b2api/v2/b2_download_file_by_name?bucketName=kora-storage&fileName=${encodeURIComponent(VALID_KEY)}`,
+      `https://download.example.test/file/kora-storage/${encodeURIComponent(VALID_KEY)}`,
       expect.objectContaining({
         method: "GET",
         headers: { Authorization: AUTHORIZATION_TOKEN },
