@@ -5,8 +5,8 @@
 #   2. New -> Blueprint -> elegir el repo -> Render crea los 3 recursos
 #      (kora-backend, kora-face-service, kora-postgres).
 #   3. En el dashboard, setear los secrets marcados `sync: false`
-#      (JWT_SECRET, KYC_DOCUMENT_HASH_PEPPER, HUGGINGFACE_API_TOKEN y
-#      GEMINI_API_KEY) y redeployar. FACE_API_KEY se genera una sola vez en
+#      (JWT_SECRET, KYC_DOCUMENT_HASH_PEPPER y HUGGINGFACE_API_TOKEN) y
+#      redeployar. FACE_API_KEY se genera una sola vez en
 #      el grupo compartido; nunca se expone al frontend.
 #
 # Limitaciones conocidas del plan free:
@@ -47,8 +47,6 @@ services:
         sync: false
       - key: HUGGINGFACE_DOCUMENT_MODEL
         value: Qwen/Qwen2.5-VL-72B-Instruct:ovhcloud
-      - key: GEMINI_API_KEY
-        sync: false
       - key: FACE_VERIFICATION_PROVIDER
         value: face_service
       - key: KYC_FACE_MIN_SIMILARITY
